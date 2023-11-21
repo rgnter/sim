@@ -6,7 +6,7 @@
 #include <cstring>
 #include <charconv>
 
-#include "sim.hpp"
+#include "sim/sim.hpp"
 
 int main(int argc, char** argv) {
   sim::Environment env;
@@ -87,6 +87,7 @@ int main(int argc, char** argv) {
       {
         y = -50;
         body._onGround = true;
+        return 0;
       }
 
       printf("\033[%d;%df",
@@ -100,6 +101,7 @@ int main(int argc, char** argv) {
     lastTick = tickNow;
     lastTickDuration =  Clock::now() - tickNow;
   }
+
 
 
   return 0;

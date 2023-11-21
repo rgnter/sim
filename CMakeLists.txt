@@ -5,7 +5,9 @@ project(sim
     DESCRIPTION "Small & insiginificant simulator")
 
 add_executable(sim
-        src/main.cpp)
+        src/main.cpp
+        src/math.cpp
+        src/sim.cpp)
 target_include_directories(sim
         PUBLIC include/)
 
