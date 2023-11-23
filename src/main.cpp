@@ -9,8 +9,9 @@
 #include "sim/sim.hpp"
 
 int main(int argc, char** argv) {
-  sim::Environment env;
-  env._wind = 0.0f;
+  sim::Environment env {
+          ._wind = math::vec3d{0.0f}
+  };
 
   sim::BodyDynamicsSimulator dynamicsSimulator(env);
   sim::BodyKinematicsSimulator kinematicsSimulator(env);

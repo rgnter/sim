@@ -35,26 +35,26 @@ struct vec3
 
   //! Optimisation in cases where magnitude doesn't have to be precise, such as vector comparison.
   //! @returns Vector magnitude.
-  float magnitudeSquared() const
+  [[nodiscard]] float magnitudeSquared() const
   {
     return std::pow(_right, 2) + std::pow(_up, 2) + std::pow(_forward, 2);
   }
 
   //! @returns Vector magnitude.
-  float magnitude() const
+  [[nodiscard]] float magnitude() const
   {
     return std::sqrt(magnitudeSquared());
   }
 
   //! @returns Absolute vector.
-  vec3<Type> absolute() const
+  [[nodiscard]] vec3<Type> absolute() const
   {
     return {std::abs(_right), std::abs(_up), std::abs(_forward)};
   }
 
   //! Vector-scalar multiplication.
   //! @param rhs Scalar.
-  vec3<Type> operator*(Type rhs) const {
+  [[nodiscard]] vec3<Type> operator*(Type rhs) const {
     return vec3<Type>(
             _right * rhs,
             _up * rhs,
@@ -64,7 +64,7 @@ struct vec3
 
   //! Vector-vector multiplication.
   //! @param rhs Vector.
-  vec3<Type> operator*(vec3<Type> rhs) const {
+  [[nodiscard]] vec3<Type> operator*(vec3<Type> rhs) const {
     return vec3<Type>(
             _right * rhs._right,
             _up * rhs._up,
@@ -74,7 +74,7 @@ struct vec3
 
   //! Vector-vector addition.
   //! @param rhs Vector.
-  vec3<Type> operator+(const vec3<Type>& rhs) const {
+  [[nodiscard]] vec3<Type> operator+(const vec3<Type>& rhs) const {
     return vec3<Type>(
             _right + rhs._right,
             _up + rhs._up,
@@ -83,7 +83,7 @@ struct vec3
 
   //! Vector-vector subtraction.
   //! @param rhs Vector.
-  vec3<Type> operator-(const vec3<Type>& rhs) const {
+  [[nodiscard]] vec3<Type> operator-(const vec3<Type>& rhs) const {
     return vec3<Type>(
             _right - rhs._right,
             _up - rhs._up,
@@ -128,6 +128,7 @@ using vec3d = vec3<double>;
 
 //! Zero vector.
 static const vec3d ZeroVector(0.0);
+
 //! Right vector.
 static const vec3d RightVector{1, 0, 0};
 //! Upward vector.
