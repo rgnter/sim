@@ -15,7 +15,7 @@
 namespace vulkan
 {
 
-class Display;
+constexpr bool debug = true;
 
 //! Engine.
 class Engine
@@ -25,6 +25,9 @@ class Engine
   using Extensions = std::vector<std::string_view>;
   //! String view of validation layer names.
   using Layers = std::vector<std::string_view>;
+
+public:
+  Engine();
 
 public:
   //! Creates the engine.
@@ -54,7 +57,6 @@ private:
   Extensions _extensions;
   Layers _layers;
 };
-
 
 //! Display.
 class Display

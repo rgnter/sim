@@ -43,6 +43,15 @@ void checkValidationLayerSupport(const std::vector<std::string_view>& layers)
 
 }// namespace
 
+Engine::Engine()
+{
+  if (debug)
+  {
+    _layers.emplace_back("VK_LAYER_KHRONOS_validation");
+    _extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  }
+}
+
 void Engine::create()
 {
   const VkApplicationInfo appInfo{
@@ -63,11 +72,14 @@ void Engine::create()
 
   // Create contiguous array of layer name pointers,
   // also check for support of required layers.
-  checkValidationLayerSupport(_layers);
   std::vector<const char*> layers;
-  for (const auto& layer: _layers)
+  if (debug)
   {
-    layers.push_back(layer.data());
+    checkValidationLayerSupport(_layers);
+    for (const auto& layer: _layers)
+    {
+      layers.push_back(layer.data());
+    }
   }
 
   const VkInstanceCreateInfo createInfo{
@@ -105,7 +117,6 @@ Engine::Extensions& Engine::layers()
 {
   return _layers;
 }
-
 
 Display::Display(Engine& engine)
     : _engine(engine) {}
