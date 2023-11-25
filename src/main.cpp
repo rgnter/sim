@@ -9,7 +9,8 @@
 #include "sim/sim.hpp"
 #include "sim/vulkan.hpp"
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   /*sim::Environment env {
     ._wind = math::vec3d{0.0f}};
 
@@ -85,12 +86,27 @@ int main(int argc, char** argv) {
   vulkan::Engine engine;
   vulkan::Display display(engine);
 
-  if (!display.create())
+  try
+  {
+    display.create();
+  }
+  catch (const std::runtime_error& x)
+  {
+    printf("Couldn't create display: %s", x.what());
     return 1;
-  if (!engine.create())
-    return 2;
+  }
 
-  while(true)
+  try
+  {
+    engine.create();
+  }
+  catch (const std::runtime_error& x)
+  {
+    printf("Couldn't create engine: %s", x.what());
+    return 1;
+  }
+
+  while (true)
   {
     display.loop();
   }

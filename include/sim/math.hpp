@@ -3,7 +3,8 @@
 
 #include <cmath>
 
-namespace math {
+namespace math
+{
 
 //! Vector of three components.
 template<typename Type>
@@ -19,19 +20,22 @@ struct vec3
   //! @param forward Scalar value for forward axis.
   vec3(Type right, Type up, Type forward)
       : _right(right), _up(up), _forward(forward)
-  {}
+  {
+  }
 
   //! Scalar constructor. Initializes all axes to scalar value provided.
   //! @param scalar Scalar value.
   explicit vec3(Type scalar)
       : vec3(scalar, scalar, scalar)
-  {}
+  {
+  }
 
   //! Copy constructor.
   //! Copies all values from provided vector to this vector.
-  vec3(const vec3 &rhs)
+  vec3(const vec3& rhs)
       : vec3(rhs._right, rhs._up, rhs._forward)
-  {}
+  {
+  }
 
   //! Optimisation in cases where magnitude doesn't have to be precise, such as vector comparison.
   //! @returns Vector magnitude.
@@ -54,55 +58,58 @@ struct vec3
 
   //! Vector-scalar multiplication.
   //! @param rhs Scalar.
-  [[nodiscard]] vec3<Type> operator*(Type rhs) const {
+  [[nodiscard]] vec3<Type> operator*(Type rhs) const
+  {
     return vec3<Type>(
-            _right * rhs,
-            _up * rhs,
-            _forward * rhs
-    );
+      _right * rhs,
+      _up * rhs,
+      _forward * rhs);
   }
 
   //! Vector-scalar division.
   //! @param rhs Scalar.
-  [[nodiscard]] vec3<Type> operator/(Type rhs) const {
+  [[nodiscard]] vec3<Type> operator/(Type rhs) const
+  {
     return vec3<Type>(
       _right / rhs,
       _up / rhs,
-      _forward / rhs
-    );
+      _forward / rhs);
   }
 
   //! Vector-vector multiplication.
   //! @param rhs Vector.
-  [[nodiscard]] vec3<Type> operator*(vec3<Type> rhs) const {
+  [[nodiscard]] vec3<Type> operator*(vec3<Type> rhs) const
+  {
     return vec3<Type>(
-            _right * rhs._right,
-            _up * rhs._up,
-            _forward * rhs._forward
-    );
+      _right * rhs._right,
+      _up * rhs._up,
+      _forward * rhs._forward);
   }
 
   //! Vector-vector addition.
   //! @param rhs Vector.
-  [[nodiscard]] vec3<Type> operator+(const vec3<Type>& rhs) const {
+  [[nodiscard]] vec3<Type> operator+(const vec3<Type>& rhs) const
+  {
     return vec3<Type>(
-            _right + rhs._right,
-            _up + rhs._up,
-            _forward + rhs._forward);
+      _right + rhs._right,
+      _up + rhs._up,
+      _forward + rhs._forward);
   }
 
   //! Vector-vector subtraction.
   //! @param rhs Vector.
-  [[nodiscard]] vec3<Type> operator-(const vec3<Type>& rhs) const {
+  [[nodiscard]] vec3<Type> operator-(const vec3<Type>& rhs) const
+  {
     return vec3<Type>(
-            _right - rhs._right,
-            _up - rhs._up,
-            _forward - rhs._forward);
+      _right - rhs._right,
+      _up - rhs._up,
+      _forward - rhs._forward);
   }
 
   //! Vector-vector addition and assignment.
   //! @param rhs Vector.
-  vec3<Type>& operator+=(const vec3<Type>& rhs) {
+  vec3<Type>& operator+=(const vec3<Type>& rhs)
+  {
     _right += rhs._right;
     _up += rhs._up;
     _forward += rhs._forward;
@@ -111,7 +118,8 @@ struct vec3
 
   //! Vector-vector subtraction and assignment.
   //! @param rhs Vector.
-  vec3<Type>& operator-=(const vec3<Type>& rhs) {
+  vec3<Type>& operator-=(const vec3<Type>& rhs)
+  {
     _right -= rhs._right;
     _up -= rhs._up;
     _forward -= rhs._forward;
@@ -120,13 +128,13 @@ struct vec3
 
   //! Vector-vector multiplication and assignment.
   //! @param rhs Vector.
-  vec3<Type>& operator*=(const vec3<Type>& rhs) {
+  vec3<Type>& operator*=(const vec3<Type>& rhs)
+  {
     _right *= rhs._right;
     _up *= rhs._up;
     _forward *= rhs._forward;
     return (*this);
   }
-
 };
 
 //! Vector of three integer components.
@@ -146,8 +154,8 @@ static const vec3d UpwardVector{0, 1, 0};
 // Forward vector.
 static const vec3d ForwardVector{0, 0, 1};
 // Sideways vector.
-static const vec3d SidewaysVector{1,0,1};
+static const vec3d SidewaysVector{1, 0, 1};
 
-} // namespace math
+}// namespace math
 
 #endif

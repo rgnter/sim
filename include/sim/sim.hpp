@@ -9,10 +9,11 @@
 
 #include <array>
 #include <list>
-#include <vector>
 #include <numeric>
+#include <vector>
 
-namespace sim {
+namespace sim
+{
 
 struct Body
 {
@@ -41,27 +42,24 @@ public:
 
   //! Gravity acceleration constant in this environment [m*s-2].
   math::vec3d _gravity = {
-          0.0f,
-          -9.81f,
-          0.0f
-  };
+    0.0f,
+    -9.81f,
+    0.0f};
 
   //! Wind acceleration constant in this environment [m*s-2].
   math::vec3d _wind = {
-          0.0f,
-          0.0f,
-          0.0f
-  };
+    0.0f,
+    0.0f,
+    0.0f};
 
   void AddBody(Body body);
-
 };
 
 //! Simulator.
 class Simulator
 {
-  protected:
-    Environment& _environment;
+protected:
+  Environment& _environment;
 
 public:
   explicit Simulator(Environment& environment) noexcept;
