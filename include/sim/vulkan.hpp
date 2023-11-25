@@ -10,12 +10,31 @@
 
 #include <string>
 #include <string_view>
+#include <format>
 #include <vector>
 
 namespace vulkan
 {
 
+#ifdef DEBUG_BUILD
 constexpr bool debug = true;
+#elifndef DEBUG_BUILD
+constexpr bool debug = false;
+#endif
+
+//! Template function for calling extension functions.
+//! @tparam Func Function signature.
+//! @param instance Vulkan instance.
+//! @param name Function name.
+//! @returns Function pointer.
+//! @throws std::runtime_error if no such function is available.
+template<typename Func>
+Func ExtFunction(VkInstance instance, const std::string_view& name) {
+  auto func = (Func) vkGetInstanceProcAddr(instance, name.data());
+  if (func == nullptr)
+    throw std::runtime_error(std::format("Extension function '{}' couldn't be loaded.", name.data()));
+  return func;
+}
 
 //! Engine.
 class Engine
@@ -52,6 +71,9 @@ private:
   VkInstance _instance{};
   VkPhysicalDevice _physicalDevice{};
   VkPhysicalDeviceProperties _physicalDeviceProperties{};
+
+private:
+  VkDebugUtilsMessengerEXT _debugMessenger{};
 
 private:
   Extensions _extensions;

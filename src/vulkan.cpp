@@ -5,6 +5,7 @@
 #include "sim/vulkan.hpp"
 
 #include <cstdio>
+#include <iostream>
 #include <format>
 
 namespace vulkan
@@ -12,6 +13,16 @@ namespace vulkan
 
 namespace
 {
+
+VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
+  VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+  VkDebugUtilsMessageTypeFlagsEXT messageType,
+  const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+  void* pUserData)
+{
+  std::cerr << "[Vulkan] " << pCallbackData->pMessage << std::endl;
+  return VK_FALSE;
+}
 
 void checkValidationLayerSupport(const std::vector<std::string_view>& layers)
 {
@@ -41,7 +52,7 @@ void checkValidationLayerSupport(const std::vector<std::string_view>& layers)
   }
 }
 
-}// namespace
+}// namespace anon
 
 Engine::Engine()
 {
@@ -82,7 +93,19 @@ void Engine::create()
     }
   }
 
-  const VkInstanceCreateInfo createInfo{
+  const VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{
+    .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+    .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
+                       | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
+                       | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
+    .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
+                   | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
+                   | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
+    .pfnUserCallback = debugCallback,
+    .pUserData = nullptr // Optional
+  };
+
+  VkInstanceCreateInfo createInfo {
     .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
     .pApplicationInfo = &appInfo,
     .enabledLayerCount = static_cast<uint32_t>(layers.size()),
@@ -91,14 +114,32 @@ void Engine::create()
     .ppEnabledExtensionNames = extensions.data(),
   };
 
+  if (debug)
+    createInfo.pNext = &debugMessengerCreateInfo;
+
   if (vkCreateInstance(&createInfo, nullptr, &_instance) != VK_SUCCESS)
   {
     throw std::runtime_error("Unable to create vulkan instance");
+  }
+
+  if (debug)
+  {
+    if (ExtFunction<PFN_vkCreateDebugUtilsMessengerEXT>(_instance, "vkCreateDebugUtilsMessengerEXT")(
+          _instance, &debugMessengerCreateInfo, nullptr, &_debugMessenger))
+    {
+      throw std::runtime_error("Couldn't create debug messenger");
+    }
   }
 }
 
 void Engine::destroy()
 {
+  if (debug)
+  {
+    if (_debugMessenger)
+      ExtFunction<PFN_vkDestroyDebugUtilsMessengerEXT>(_instance, "vkDestroyDebugUtilsMessengerEXT")(_instance, _debugMessenger, nullptr);
+  }
+
   if (_instance)
     vkDestroyInstance(_instance, nullptr);
 }

@@ -106,10 +106,7 @@ int main(int argc, char** argv)
     return 1;
   }
 
-  while (true)
-  {
-    display.loop();
-  }
+  display.loop();
 
   display.destroy();
   engine.destroy();

@@ -15,5 +15,11 @@ target_include_directories(sim
         PUBLIC include/)
 target_compile_features(sim
         PRIVATE cxx_std_23)
+
+if($CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_definitions(sim
+            PRIVATE DEBUG_BUILD)
+endif()
+
 target_link_libraries(sim
         PRIVATE glfw glm Vulkan::Vulkan)
