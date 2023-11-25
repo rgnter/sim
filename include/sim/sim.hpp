@@ -6,6 +6,7 @@
 #define SIM_SIM_HPP
 
 #include "math.hpp"
+
 #include <array>
 #include <list>
 #include <vector>

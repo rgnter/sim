@@ -62,6 +62,16 @@ struct vec3
     );
   }
 
+  //! Vector-scalar division.
+  //! @param rhs Scalar.
+  [[nodiscard]] vec3<Type> operator/(Type rhs) const {
+    return vec3<Type>(
+      _right / rhs,
+      _up / rhs,
+      _forward / rhs
+    );
+  }
+
   //! Vector-vector multiplication.
   //! @param rhs Vector.
   [[nodiscard]] vec3<Type> operator*(vec3<Type> rhs) const {
