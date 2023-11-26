@@ -78,6 +78,7 @@ public:
   void Tick(float time) noexcept override;
 };
 
+
 //! Body kinematics simulator.
 class BodyKinematicsSimulator
     : public Simulator

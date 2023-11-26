@@ -4,205 +4,359 @@
 
 #include "sim/vulkan.hpp"
 
-#include <cstdio>
-#include <iostream>
-#include <format>
-
 namespace vulkan
 {
 
-namespace
+void Renderer::surface(GLFWwindow* window)
 {
+  // Create surface
+  VkSurfaceKHR directSurface;
+  glfwCreateWindowSurface(*_instance, window, nullptr, &directSurface);
+  _surface = vkr::SurfaceKHR(_instance, directSurface);
 
-VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-  VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-  VkDebugUtilsMessageTypeFlagsEXT messageType,
-  const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-  void* pUserData)
-{
-  std::cerr << "[Vulkan] " << pCallbackData->pMessage << std::endl;
-  return VK_FALSE;
+  _devExtensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 }
 
-void checkValidationLayerSupport(const std::vector<std::string_view>& layers)
+void Renderer::physicalDevice()
 {
-  uint32_t layerCount;
-  vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
-  std::vector<VkLayerProperties> availableLayers(layerCount);
-  vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+  const vkr::PhysicalDevices physicalDevices(_instance);
+  _physicalDevice = physicalDevices.front();
+  printf("Selected physical device: %s\n", _physicalDevice.getProperties().deviceName.data());
+}
 
-  for (const auto& requiredLayer: layers)
+void Renderer::logicalDevice()
+{
+  float queuePriorities[] = {0.0f};
+
+  const auto queueFamilyProperties
+    = _physicalDevice.getQueueFamilyProperties();
+
+  for (int32_t index = 0; const auto& queueFamily: queueFamilyProperties)
   {
-    bool isLayerSupported = false;
-
-    for (const auto& availableLayer: availableLayers)
+    if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics)
     {
-      if (requiredLayer == availableLayer.layerName)
+      _queueFamilyHints.graphicsFamily = index;
+    }
+    if (_physicalDevice.getSurfaceSupportKHR(index, *_surface))
+    {
+      _queueFamilyHints.presentFamily = index;
+    }
+    index++;
+  }
+
+  if (!_queueFamilyHints.graphicsFamily
+      || !_queueFamilyHints.presentFamily)
+    throw std::runtime_error("No queue family supporting graphics and presentation found");
+
+  std::vector<const char*> extensions;
+  extensions.reserve(_devExtensions.size());
+  for (const auto& ext: _devExtensions)
+  {
+    extensions.emplace_back(ext.data());
+  }
+
+  const vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
+    .queueFamilyIndex = _queueFamilyHints.graphicsFamily.value(),
+    .queueCount = 1,
+    .pQueuePriorities = queuePriorities,
+  };
+
+  _device = vkr::Device(
+    _physicalDevice,
+    vk::DeviceCreateInfo {
+      .queueCreateInfoCount = 1,
+      .pQueueCreateInfos = &deviceQueueCreateInfo,
+      .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+      .ppEnabledExtensionNames = extensions.data()
+    });
+}
+
+void Renderer::swapChain()
+{
+  const auto surfaceFormats
+    = _physicalDevice.getSurfaceFormatsKHR(*_surface);
+  if (surfaceFormats.empty())
+    throw std::runtime_error("No surface formats supported.");
+
+  const auto& imageFormat = surfaceFormats.front().format == vk::Format::eUndefined
+                              ? vk::Format::eB8G8R8A8Unorm
+                              : surfaceFormats.front().format;
+
+  _surfaceCapabilities = _physicalDevice.getSurfaceCapabilitiesKHR(*_surface);
+
+  const vk::Extent2D swapChainExtent =
+    _surfaceCapabilities.currentExtent;
+
+  const vk::PresentModeKHR swapChainPresentMode
+    = vk::PresentModeKHR::eFifo;
+
+  const vk::SurfaceTransformFlagBitsKHR preTransform =
+    _surfaceCapabilities.supportedTransforms & vk::SurfaceTransformFlagBitsKHR::eIdentity
+      ? vk::SurfaceTransformFlagBitsKHR::eIdentity : _surfaceCapabilities.currentTransform;
+
+  const vk::CompositeAlphaFlagBitsKHR compositeAlpha =
+    _surfaceCapabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::ePreMultiplied
+      ? vk::CompositeAlphaFlagBitsKHR::ePreMultiplied : _surfaceCapabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::ePostMultiplied
+          ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied : _surfaceCapabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::eInherit
+              ? vk::CompositeAlphaFlagBitsKHR::eInherit : vk::CompositeAlphaFlagBitsKHR::eOpaque;
+
+  vk::SwapchainCreateInfoKHR swapChainCreateInfo {
+    .surface = *_surface,
+    .minImageCount = _surfaceCapabilities.minImageCount,
+    .imageFormat = imageFormat,
+    .imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
+    .imageExtent = swapChainExtent,
+    .imageArrayLayers = 1,
+    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+    .imageSharingMode = vk::SharingMode::eExclusive,
+    .preTransform = preTransform,
+    .compositeAlpha = compositeAlpha,
+    .presentMode = swapChainPresentMode,
+    .clipped = true,
+  };
+
+  _swapChain = vkr::SwapchainKHR(
+    _device, swapChainCreateInfo);
+
+  const auto swapChainImages = _swapChain.getImages();
+  std::vector<vkr::ImageView> swapChainImageViews;
+  swapChainImageViews.reserve(swapChainImages.size());
+
+  for (const auto& image : swapChainImages)
+  {
+    swapChainImageViews.emplace_back(
+      _device,
+      vk::ImageViewCreateInfo {
+        .image = image,
+        .viewType = vk::ImageViewType::e2D,
+        .format = imageFormat,
+        .subresourceRange = {
+          .aspectMask = vk::ImageAspectFlagBits::eColor,
+          .baseMipLevel = 0,
+          .levelCount = 1,
+          .baseArrayLayer = 0,
+          .layerCount = 1,
+        },
+      });
+  }
+
+}
+
+void Renderer::depthBuffer()
+{
+  const vk::Format depthFormat = vk::Format::eD16Unorm;
+  const vk::FormatProperties formatProperties
+    = _physicalDevice.getFormatProperties(depthFormat);
+
+  // Determine tiling available for depth buffer
+  vk::ImageTiling imageTiling;
+  if (formatProperties.linearTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment)
+    imageTiling = vk::ImageTiling::eLinear;
+  else if ( formatProperties.optimalTilingFeatures & vk::FormatFeatureFlagBits::eDepthStencilAttachment )
+    imageTiling = vk::ImageTiling::eOptimal;
+  else
+    throw std::runtime_error("DepthStencilAttachment is not supported for D16Unorm depth format." );
+
+  _depthImage = vkr::Image(
+    _device,
+    vk::ImageCreateInfo {
+      .imageType = vk::ImageType::e2D,
+      .format = depthFormat,
+      .extent = vk::Extent3D {
+        .width = _surfaceCapabilities.currentExtent.width,
+        .height = _surfaceCapabilities.currentExtent.height,
+        .depth = 1
+      },
+      .mipLevels = 1,
+      .arrayLayers = 1,
+      .samples = vk::SampleCountFlagBits::e1,
+      .tiling = imageTiling,
+      .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment
+    });
+
+  const vk::PhysicalDeviceMemoryProperties memoryProperties
+    = _physicalDevice.getMemoryProperties();
+  const vk::MemoryRequirements memoryRequirements
+    = _depthImage.getMemoryRequirements();
+
+  uint32_t memoryTypeBits = memoryRequirements.memoryTypeBits;
+  uint32_t memoryTypeIndex = uint32_t( ~0 );
+  for ( uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++ )
+  {
+    const auto& memoryType = memoryProperties.memoryTypes[i];
+    if ((memoryTypeBits & 1)
+        && (memoryType.propertyFlags & vk::MemoryPropertyFlagBits::eDeviceLocal) == vk::MemoryPropertyFlagBits::eDeviceLocal)
+    {
+      memoryTypeIndex = i;
+      break;
+    }
+    memoryTypeBits >>= 1;
+  }
+  assert(memoryTypeIndex != uint32_t( ~0 ) );
+
+  _depthMemory = vkr::DeviceMemory (
+    _device,
+    vk::MemoryAllocateInfo {
+      .allocationSize = memoryRequirements.size,
+      .memoryTypeIndex = memoryTypeIndex,
+    });
+
+  _depthImageView = vkr::ImageView(
+    _device,
+    vk::ImageViewCreateInfo {
+      .image = *_depthImage,
+      .viewType = vk::ImageViewType::e2D,
+      .format = depthFormat,
+      .subresourceRange = {
+        .aspectMask = vk::ImageAspectFlagBits::eDepth,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1
+      }
+    });
+}
+
+void Renderer::uniformBuffer()
+{
+  const auto model = glm::mat4x4( 1.0f );
+  const auto view = glm::lookAt(
+    glm::vec3(-5.0f, 3.0f, -10.0f),
+    glm::vec3(0.0f, 0.0f, 0.0f),
+    glm::vec3(0.0f, -1.0f, 0.0f));
+
+  const auto projection = glm::perspective(
+    glm::radians( 45.0f ),
+    1.0f,
+    0.1f,
+    100.0f);
+
+  const auto clip = glm::mat4x4(
+    1.0f,  0.0f, 0.0f, 0.0f,
+    0.0f, -1.0f, 0.0f, 0.0f,
+    0.0f,  0.0f, 0.5f, 0.0f,
+    0.0f,  0.0f, 0.5f, 1.0f);  // vulkan clip space has inverted y and half z !
+
+  const auto mvpc = clip * projection * view * model;
+
+  _uniformBuffer =  vkr::Buffer(
+    _device,
+    vk::BufferCreateInfo {
+      .size = sizeof(mvpc),
+      .usage = vk::BufferUsageFlagBits::eUniformBuffer
+    });
+
+  const auto memoryProperties = _physicalDevice.getMemoryProperties();
+  const auto memoryRequirements = _uniformBuffer.getMemoryRequirements();
+  uint32_t memoryTypeIndex = 0;
+
+  // Find the right memory for the uniform buffer.
+  for (; memoryTypeIndex < memoryProperties.memoryTypeCount; ++memoryTypeIndex)
+  {
+    const auto memoryTypeBit = 1 << memoryTypeIndex;
+    if (memoryRequirements.memoryTypeBits & memoryTypeBit)
+    {
+      const auto memoryType = memoryProperties.memoryTypes[memoryTypeIndex];
+      if (memoryType.propertyFlags & (vk::MemoryPropertyFlagBits::eHostVisible
+                                      | vk::MemoryPropertyFlagBits::eHostCoherent))
       {
-        isLayerSupported = true;
+        // we found the right memory, yippie!!
         break;
       }
     }
+  }
 
-    if (!isLayerSupported)
+  _uniformBufferMemory = vkr::DeviceMemory(
+    _device,
+    vk::MemoryAllocateInfo {
+      .allocationSize = memoryRequirements.size,
+      .memoryTypeIndex = memoryTypeIndex,
+    });
+
+  auto* bufferData = static_cast<uint8_t*>(
+    _uniformBufferMemory.mapMemory(0, memoryRequirements.size));
+  std::memcpy(bufferData, &mvpc, sizeof(mvpc));
+  _uniformBufferMemory.unmapMemory();
+
+  _uniformBuffer.bindMemory(*_uniformBufferMemory, 0);
+}
+
+void Renderer::commands()
+{
+  _commandPool = vkr::CommandPool(
+    _device,
+    vk::CommandPoolCreateInfo {
+      .queueFamilyIndex = _queueFamilyHints.graphicsFamily.value()
+    });
+
+  _commandBuffers = vkr::CommandBuffers(
+    _device,
+    vk::CommandBufferAllocateInfo {
+      .commandPool = *_commandPool,
+      .level = vk::CommandBufferLevel::ePrimary
+    });
+}
+
+void Renderer::setup()
+{
+  const vk::DebugUtilsMessengerCreateInfoEXT debugMessengerInfo = {
+    .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+                       | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning
+                       | vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose,
+    .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral
+                   | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
+                   | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation,
+    .pfnUserCallback = [](
+      VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+      VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+      const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+      void* pUserData) -> VkBool32
     {
-      throw std::runtime_error(
-        std::format("Validation layer '{}' not supported", requiredLayer.data()));
-    }
-  }
-}
+      printf("[Vulkan] %s\n", pCallbackData->pMessage);
+      return VK_FALSE;
+    }};
+  _extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+  _extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
 
-}// namespace anon
-
-Engine::Engine()
-{
-  if (debug)
-  {
-    _layers.emplace_back("VK_LAYER_KHRONOS_validation");
-    _extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-  }
-}
-
-void Engine::create()
-{
-  const VkApplicationInfo appInfo{
-    .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
+  const vk::ApplicationInfo applicationInfo {
+    .pNext = &debugMessengerInfo,
     .pApplicationName = "Hello World",
-    .applicationVersion = VK_MAKE_VERSION(1, 0, 0),
+    .applicationVersion = 1,
     .pEngineName = "Engine",
-    .engineVersion = VK_MAKE_VERSION(1, 0, 0),
-    .apiVersion = VK_API_VERSION_1_0,
+    .engineVersion = 1,
+    .apiVersion = VK_API_VERSION_1_1,
   };
 
-  // Create contiguous array of extension name pointers.
+  // Extensions in contiguous array
   std::vector<const char*> extensions;
+  extensions.reserve(_extensions.size());
   for (const auto& extension: _extensions)
   {
-    extensions.push_back(extension.data());
+    extensions.emplace_back(extension.data());
   }
 
-  // Create contiguous array of layer name pointers,
-  // also check for support of required layers.
+  // Layers in contiguous array
   std::vector<const char*> layers;
-  if (debug)
+  extensions.reserve(_layers.size());
+  for (const auto& layer: _layers)
   {
-    checkValidationLayerSupport(_layers);
-    for (const auto& layer: _layers)
-    {
-      layers.push_back(layer.data());
-    }
+    layers.emplace_back(layer.data());
   }
 
-  const VkDebugUtilsMessengerCreateInfoEXT debugMessengerCreateInfo{
-    .sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-    .messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT
-                       | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT
-                       | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT,
-    .messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT
-                   | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT
-                   | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT,
-    .pfnUserCallback = debugCallback,
-    .pUserData = nullptr // Optional
-  };
-
-  VkInstanceCreateInfo createInfo {
-    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-    .pApplicationInfo = &appInfo,
+  const vk::InstanceCreateInfo instanceCreateInfo {
+    .pApplicationInfo = &applicationInfo,
     .enabledLayerCount = static_cast<uint32_t>(layers.size()),
     .ppEnabledLayerNames = layers.data(),
     .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
     .ppEnabledExtensionNames = extensions.data(),
   };
 
-  if (debug)
-    createInfo.pNext = &debugMessengerCreateInfo;
+  // Setup instance
+  _instance = vkr::Instance(_ctx, instanceCreateInfo);
 
-  if (vkCreateInstance(&createInfo, nullptr, &_instance) != VK_SUCCESS)
-  {
-    throw std::runtime_error("Unable to create vulkan instance");
-  }
-
-  if (debug)
-  {
-    if (ExtFunction<PFN_vkCreateDebugUtilsMessengerEXT>(_instance, "vkCreateDebugUtilsMessengerEXT")(
-          _instance, &debugMessengerCreateInfo, nullptr, &_debugMessenger))
-    {
-      throw std::runtime_error("Couldn't create debug messenger");
-    }
-  }
+  // Setup debugger
+  vkr::DebugUtilsMessengerEXT debugMessenger(
+    _instance, debugMessengerInfo);
 }
 
-void Engine::destroy()
-{
-  if (debug)
-  {
-    if (_debugMessenger)
-      ExtFunction<PFN_vkDestroyDebugUtilsMessengerEXT>(_instance, "vkDestroyDebugUtilsMessengerEXT")(_instance, _debugMessenger, nullptr);
-  }
-
-  if (_instance)
-    vkDestroyInstance(_instance, nullptr);
-}
-
-VkInstance& Engine::vk()
-{
-  return _instance;
-}
-
-Engine::Extensions& Engine::extensions()
-{
-  return _extensions;
-}
-
-Engine::Extensions& Engine::layers()
-{
-  return _layers;
-}
-
-Display::Display(Engine& engine)
-    : _engine(engine) {}
-
-void Display::create()
-{
-  if (!glfwInit())
-    throw std::runtime_error("Couldn't initialize GLFW");
-
-  uint32_t glfwExtensionCount = 0;
-  const char** glfwExtensions;
-  glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-  // Copy the GLFW required extensions to engine's extension list.
-  if (glfwExtensions)
-  {
-    auto& engineExtensions = _engine.extensions();
-    for (int32_t i = 0; i < glfwExtensionCount; i++)
-    {
-      engineExtensions.emplace_back(glfwExtensions[i]);
-    }
-  }
-
-  glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-
-  _window = glfwCreateWindow(_width, _height, _title.c_str(), nullptr, nullptr);
-  if (!_window)
-    throw std::runtime_error("Couldn't create window");
-}
-
-void Display::destroy()
-{
-  if (_window)
-    glfwDestroyWindow(_window);
-
-  glfwTerminate();
-}
-
-void Display::loop()
-{
-  while (!glfwWindowShouldClose(_window))
-  {
-    glfwPollEvents();
-  }
-}
-
-}// namespace vulkan
+} // namespace vulkan

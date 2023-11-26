@@ -21,9 +21,11 @@ void sim::BodyDynamicsSimulator::Tick(float time) noexcept
 {
   for (auto& body: _environment._bodies)
   {
-    const math::vec3d kineticFrictionForce = math::vec3d{_environment._gravity._up * (0.50 / 0.20)} * math::SidewaysVector;
+    const math::vec3d kineticFrictionForce =
+      math::vec3d{_environment._gravity._up * (0.50 / 0.20)} * math::SidewaysVector;
 
-    const math::vec3d staticFrictionForce = math::vec3d{_environment._gravity._up * (0.50 / 0.35)} * math::SidewaysVector;
+    const math::vec3d staticFrictionForce =
+      math::vec3d{_environment._gravity._up * (0.50 / 0.35)} * math::SidewaysVector;
 
     std::array<math::vec3d, 3> forces{
       // Add gravity force to the body.

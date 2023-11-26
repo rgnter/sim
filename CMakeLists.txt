@@ -22,4 +22,4 @@ if($CMAKE_BUILD_TYPE STREQUAL "Debug")
 endif()
 
 target_link_libraries(sim
-        PRIVATE glfw glm Vulkan::Vulkan)
+        PRIVATE glfw glm::glm Vulkan::Vulkan)
