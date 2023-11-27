@@ -13,7 +13,11 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <string_view>
+#include <filesystem>
 #include <array>
+#include <memory>
+#include <fstream>
+#include <format>
 #include <vector>
 
 namespace vulkan
@@ -39,6 +43,30 @@ public:
   //! Setup swap chain.
   void swapChain();
 
+  void framebuffers()
+  {
+    _framebuffers.reserve(_swapChainImageViews.size());
+
+    for (const auto& swapChainImageView : _swapChainImageViews)
+    {
+      std::array framebufferAttachements = {
+        *swapChainImageView,
+        *_depthImageView,
+      };
+
+      _framebuffers.emplace_back(
+        _device,
+        vk::FramebufferCreateInfo {
+          .renderPass = *_renderPass,
+          .attachmentCount = framebufferAttachements.size(),
+          .pAttachments = framebufferAttachements.data(),
+          .width = _surfaceCapabilities.currentExtent.width,
+          .height = _surfaceCapabilities.currentExtent.height,
+          .layers = 1
+        });
+    }
+  }
+
   //! Setup depth buffer.
   void depthBuffer();
 
@@ -50,6 +78,42 @@ public:
 
   //! Setup render pass.
   void renderPass();
+
+  //! Setup shaders.
+  void shaders()
+  {
+    const auto readSpvBinary = [](const std::filesystem::path& shaderBinaryPath) {
+      const auto size = std::filesystem::file_size(shaderBinaryPath);
+      std::ifstream input(shaderBinaryPath, std::ios::binary);
+      if (input.bad())
+        throw std::runtime_error(
+          std::format("Couldn't find shader at '{}'", shaderBinaryPath.c_str()));
+
+      std::vector<uint8_t> buffer(size);
+      input.read(reinterpret_cast<char*>(buffer.data()), size);
+      return std::pair{buffer, size};
+    };
+
+    const auto [vertexData, vertexLength] = readSpvBinary("cube-vert.spv");
+    const auto [fragmentData, fragmentLength] = readSpvBinary("cube-frag.spv");
+
+    assert(vertexData.capacity() % sizeof(uint32_t) == 0);
+    assert(fragmentData.capacity() % sizeof(uint32_t) == 0);
+
+    _vertexShader = vkr::ShaderModule(
+      _device,
+      vk::ShaderModuleCreateInfo{
+        .codeSize = vertexLength,
+        .pCode = reinterpret_cast<const uint32_t*>(vertexData.data())
+      });
+
+     _fragmentShader = vkr::ShaderModule(
+      _device,
+      vk::ShaderModuleCreateInfo{
+        .codeSize = fragmentLength,
+        .pCode = reinterpret_cast<const uint32_t*>(fragmentData.data())
+      });
+  }
 
   //! Setup command pool and command buffers.
   void commands();
@@ -82,15 +146,20 @@ private:
   vkr::DescriptorSets _uniformDescriptorSets { nullptr };
 
 private:
-  vkr::RenderPass _renderPass { nullptr };
-  vkr::PipelineLayout _pipelineLayout { nullptr };
-
-private:
   vkr::SurfaceKHR _surface { nullptr };
   vk::SurfaceCapabilitiesKHR _surfaceCapabilities {};
   vkr::SwapchainKHR _swapChain { nullptr };
   std::vector<vkr::ImageView> _swapChainImageViews;
   vk::Format _surfaceImageFormat {};
+  std::vector<vkr::Framebuffer> _framebuffers;
+
+private:
+  vkr::RenderPass _renderPass { nullptr };
+  vkr::PipelineLayout _pipelineLayout { nullptr };
+
+private:
+  vkr::ShaderModule _fragmentShader { nullptr };
+  vkr::ShaderModule _vertexShader { nullptr };
 
 private:
   struct QueueFamilyHints
@@ -155,6 +224,7 @@ public:
     _renderer.depthBuffer();
     _renderer.uniformBuffer();
     _renderer.pipeline();
+    _renderer.shaders();
     _renderer.renderPass();
 
     _renderer.commands();

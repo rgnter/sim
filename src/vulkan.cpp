@@ -9,19 +9,25 @@ namespace vulkan
 
 void Renderer::surface(GLFWwindow* window)
 {
-  // Create surface
+  // Create surface.
   VkSurfaceKHR directSurface;
   glfwCreateWindowSurface(*_instance, window, nullptr, &directSurface);
   _surface = vkr::SurfaceKHR(_instance, directSurface);
 
-  _devExtensions.emplace_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+  // Swap chain extension for device.
+  _devExtensions.emplace_back(
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 }
 
 void Renderer::physicalDevice()
 {
+  // Query physical devices.
   const vkr::PhysicalDevices physicalDevices(_instance);
+  // The first one should be good enough.
   _physicalDevice = physicalDevices.front();
-  printf("Selected physical device: %s\n", _physicalDevice.getProperties().deviceName.data());
+
+  printf("Selected physical device: %s\n",
+         _physicalDevice.getProperties().deviceName.data());
 }
 
 void Renderer::logicalDevice()
@@ -31,51 +37,56 @@ void Renderer::logicalDevice()
   const auto queueFamilyProperties
     = _physicalDevice.getQueueFamilyProperties();
 
+  // Find queue families for graphics & present
   for (int32_t index = 0; const auto& queueFamily: queueFamilyProperties)
   {
     if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics)
     {
       _queueFamilyHints.graphicsFamily = index;
+
+      const auto glfwSupport = glfwGetPhysicalDevicePresentationSupport(
+        *_instance, *_physicalDevice, index);
+      if (_physicalDevice.getSurfaceSupportKHR(index, *_surface)
+          && glfwSupport == GLFW_TRUE)
+      {
+        _queueFamilyHints.presentFamily = index;
+      }
+      index++;
     }
-    if (_physicalDevice.getSurfaceSupportKHR(index, *_surface))
+
+    if (!_queueFamilyHints.graphicsFamily || !_queueFamilyHints.presentFamily)
+      throw std::runtime_error("No queue family supporting graphics and presentation found");
+
+    // Device extensions in contiguous array.
+    std::vector<const char*> extensions;
+    extensions.reserve(_devExtensions.size());
+    for (const auto& ext: _devExtensions)
     {
-      _queueFamilyHints.presentFamily = index;
+      extensions.emplace_back(ext.data());
     }
-    index++;
+
+    const vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
+      .queueFamilyIndex = _queueFamilyHints.graphicsFamily.value(),
+      .queueCount = 1,
+      .pQueuePriorities = queuePriorities,
+    };
+
+    // Create the device.
+    _device = vkr::Device(
+      _physicalDevice,
+      vk::DeviceCreateInfo{
+        .queueCreateInfoCount = 1,
+        .pQueueCreateInfos = &deviceQueueCreateInfo,
+        .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
+        .ppEnabledExtensionNames = extensions.data()});
   }
-
-  if (!_queueFamilyHints.graphicsFamily
-      || !_queueFamilyHints.presentFamily)
-    throw std::runtime_error("No queue family supporting graphics and presentation found");
-
-  std::vector<const char*> extensions;
-  extensions.reserve(_devExtensions.size());
-  for (const auto& ext: _devExtensions)
-  {
-    extensions.emplace_back(ext.data());
-  }
-
-  const vk::DeviceQueueCreateInfo deviceQueueCreateInfo{
-    .queueFamilyIndex = _queueFamilyHints.graphicsFamily.value(),
-    .queueCount = 1,
-    .pQueuePriorities = queuePriorities,
-  };
-
-  _device = vkr::Device(
-    _physicalDevice,
-    vk::DeviceCreateInfo {
-      .queueCreateInfoCount = 1,
-      .pQueueCreateInfos = &deviceQueueCreateInfo,
-      .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
-      .ppEnabledExtensionNames = extensions.data()
-    });
 }
 
 void Renderer::swapChain()
 {
+  // Query the surface formats supported by the physical device.
   const auto surfaceFormats
     = _physicalDevice.getSurfaceFormatsKHR(*_surface);
-
   if (surfaceFormats.empty())
     throw std::runtime_error("No surface formats supported.");
 
@@ -101,11 +112,9 @@ void Renderer::swapChain()
           ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied : _surfaceCapabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::eInherit
               ? vk::CompositeAlphaFlagBitsKHR::eInherit : vk::CompositeAlphaFlagBitsKHR::eOpaque;
 
-  _swapChain = vkr::SwapchainKHR(
-    _device,
-    vk::SwapchainCreateInfoKHR {
+  vk::SwapchainCreateInfoKHR swapChainCreateInfo {
       .surface = *_surface,
-      .minImageCount = _surfaceCapabilities.minImageCount,
+      .minImageCount = _surfaceCapabilities.minImageCount, // buffering strategy
       .imageFormat = _surfaceImageFormat,
       .imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
       .imageExtent = swapChainExtent,
@@ -115,8 +124,24 @@ void Renderer::swapChain()
       .preTransform = preTransform,
       .compositeAlpha = compositeAlpha,
       .presentMode = swapChainPresentMode,
-      .clipped = true,
-    });
+      .clipped = true};
+
+  std::array queueFamilyIndices = {
+    _queueFamilyHints.graphicsFamily.value(),
+    _queueFamilyHints.presentFamily.value()};
+
+  // If present family is different from graphics family,
+  // enable image sharing across the family queues.
+  if (_queueFamilyHints.graphicsFamily
+      != _queueFamilyHints.presentFamily)
+  {
+    swapChainCreateInfo.imageSharingMode = vk::SharingMode::eConcurrent;
+    swapChainCreateInfo.queueFamilyIndexCount = 2;
+    swapChainCreateInfo.pQueueFamilyIndices = queueFamilyIndices.data();
+  }
+
+  _swapChain = vkr::SwapchainKHR(
+    _device, swapChainCreateInfo);
 
   const auto swapChainImages = _swapChain.getImages();
   _swapChainImageViews.reserve(swapChainImages.size());
@@ -170,7 +195,8 @@ void Renderer::depthBuffer()
       .arrayLayers = 1,
       .samples = vk::SampleCountFlagBits::e1,
       .tiling = imageTiling,
-      .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment
+      .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment,
+      .sharingMode = vk::SharingMode::eExclusive,
     });
 
   const vk::PhysicalDeviceMemoryProperties memoryProperties
@@ -200,6 +226,8 @@ void Renderer::depthBuffer()
       .memoryTypeIndex = memoryTypeIndex,
     });
 
+  _depthImage.bindMemory(*_depthMemory, 0);
+
   _depthImageView = vkr::ImageView(
     _device,
     vk::ImageViewCreateInfo {
@@ -219,6 +247,7 @@ void Renderer::depthBuffer()
 void Renderer::uniformBuffer()
 {
   const auto model = glm::mat4x4( 1.0f );
+
   const auto view = glm::lookAt(
     glm::vec3(-5.0f, 3.0f, -10.0f),
     glm::vec3(0.0f, 0.0f, 0.0f),
