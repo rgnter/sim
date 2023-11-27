@@ -295,7 +295,8 @@ void Renderer::uniformBuffer()
     _device,
     vk::BufferCreateInfo {
       .size = sizeof(mvpc),
-      .usage = vk::BufferUsageFlagBits::eUniformBuffer
+      .usage = vk::BufferUsageFlagBits::eUniformBuffer,
+      .sharingMode = vk::SharingMode::eExclusive
     });
 
   const auto memoryProperties = _physicalDevice.getMemoryProperties();
@@ -333,6 +334,82 @@ void Renderer::uniformBuffer()
   _uniformBuffer.bindMemory(*_uniformBufferMemory, 0);
 }
 
+void Renderer::vertexBuffer()
+{
+  static const float verticies[] = {
+    // front
+    -1.0f, -1.0f, +1.0f,
+    +1.0f, -1.0f, +1.0f,
+    -1.0f, +1.0f, +1.0f,
+    +1.0f, +1.0f, +1.0f,
+    // back
+    +1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f, -1.0f,
+    +1.0f, +1.0f, -1.0f,
+    -1.0f, +1.0f, -1.0f,
+    // right
+    +1.0f, -1.0f, +1.0f,
+    +1.0f, -1.0f, -1.0f,
+    +1.0f, +1.0f, +1.0f,
+    +1.0f, +1.0f, -1.0f,
+    // left
+    -1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f, +1.0f,
+    -1.0f, +1.0f, -1.0f,
+    -1.0f, +1.0f, +1.0f,
+    // top
+    -1.0f, +1.0f, +1.0f,
+    +1.0f, +1.0f, +1.0f,
+    -1.0f, +1.0f, -1.0f,
+    +1.0f, +1.0f, -1.0f,
+    // bottom
+    -1.0f, -1.0f, -1.0f,
+    +1.0f, -1.0f, -1.0f,
+    -1.0f, -1.0f, +1.0f,
+    +1.0f, -1.0f, +1.0f
+  };
+
+  _vertexBuffer = vkr::Buffer(
+    _device,
+    vk::BufferCreateInfo {
+      .size = sizeof(verticies),
+      .usage = vk::BufferUsageFlagBits::eVertexBuffer,
+      .sharingMode = vk::SharingMode::eExclusive,});
+
+  const auto memoryProperties = _physicalDevice.getMemoryProperties();
+  const auto memoryRequirements = _vertexBuffer.getMemoryRequirements();
+  uint32_t memoryTypeIndex = 0;
+
+  // Find the right memory for the uniform buffer.
+  for (; memoryTypeIndex < memoryProperties.memoryTypeCount; ++memoryTypeIndex)
+  {
+    const auto memoryTypeBit = 1 << memoryTypeIndex;
+    if (memoryRequirements.memoryTypeBits & memoryTypeBit)
+    {
+      const auto memoryType = memoryProperties.memoryTypes[memoryTypeIndex];
+      if (memoryType.propertyFlags & (vk::MemoryPropertyFlagBits::eHostVisible
+                                      | vk::MemoryPropertyFlagBits::eHostCoherent))
+      {
+        // we found the right memory, yippie!!
+        break;
+      }
+    }
+  }
+
+  _vertexBufferMemory = vkr::DeviceMemory(
+    _device,
+    vk::MemoryAllocateInfo {
+      .allocationSize = memoryRequirements.size,
+      .memoryTypeIndex = memoryTypeIndex
+    });
+
+  auto memory = static_cast<uint8_t*>(
+    _vertexBufferMemory.mapMemory(0, memoryRequirements.size));
+  std::memcpy(memory, verticies, sizeof (verticies));
+  _vertexBufferMemory.unmapMemory();
+  _vertexBuffer.bindMemory(*_vertexBufferMemory, 0);
+}
+
 void Renderer::renderPass()
 {
   std::array<vk::AttachmentDescription, 2> attachmentDescriptions = {
@@ -364,7 +441,7 @@ void Renderer::renderPass()
 
   const vk::AttachmentReference depthAttachmentReference =  {
     .attachment = 1,
-    .layout = vk::ImageLayout::eDepthAttachmentOptimal};
+    .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal};
 
   const vk::SubpassDescription subpassDescription = {
     .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
@@ -436,10 +513,10 @@ void Renderer::pipeline()
       .setLayoutCount = 1,
       .pSetLayouts = &(*_uniformDescriptorLayout),});
 
-  const vk::DescriptorPoolSize uniformDescriptorPoolSize{
+  // Uniform buffer
+  const vk::DescriptorPoolSize uniformDescriptorPoolSize {
     .type = vk::DescriptorType::eUniformBuffer,
     .descriptorCount = 1};
-
   _uniformDescriptorPool = vkr::DescriptorPool(
     _device,
     vk::DescriptorPoolCreateInfo {
@@ -447,7 +524,6 @@ void Renderer::pipeline()
       .maxSets = 1,
       .poolSizeCount = 1,
       .pPoolSizes = &uniformDescriptorPoolSize});
-
   _uniformDescriptorSets = vkr::DescriptorSets(
     _device,
     vk::DescriptorSetAllocateInfo {
@@ -467,6 +543,130 @@ void Renderer::pipeline()
     .pBufferInfo = &uniformDescriptorBufferInfo};
 
   _device.updateDescriptorSets(writeUniformDescriptorSet, nullptr);
+
+  std::array pipelineShaderStageCreateInfos {
+    vk::PipelineShaderStageCreateInfo {
+      .stage = vk::ShaderStageFlagBits::eVertex,
+      .module = *_vertexShader,
+      .pName = "main",
+    },
+    vk::PipelineShaderStageCreateInfo {
+      .stage = vk::ShaderStageFlagBits::eFragment,
+      .module = *_fragmentShader,
+      .pName = "main",
+    },
+  };
+
+  vk::VertexInputBindingDescription vertexInputBindingDescription {
+    .binding = 0,
+    .stride = sizeof(float) * 3,
+    .inputRate = vk::VertexInputRate::eVertex,
+  };
+
+  std::array vertexAttributeDescriptions {
+    vk::VertexInputAttributeDescription {
+      .location = 0,
+      .binding = 0,
+      .format = vk::Format::eR32G32B32A32Sfloat,
+    },
+  };
+
+  vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo {
+    .vertexBindingDescriptionCount = 1,
+    .pVertexBindingDescriptions = &vertexInputBindingDescription,
+    .vertexAttributeDescriptionCount = 1,
+    .pVertexAttributeDescriptions = vertexAttributeDescriptions.data()};
+
+  vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo {
+    .topology = vk::PrimitiveTopology::eTriangleList
+  };
+
+  vk::PipelineViewportStateCreateInfo viewportStateCreateInfo {
+    .viewportCount = 1,
+    .scissorCount = 1,
+  };
+
+  vk::PipelineRasterizationStateCreateInfo rasterizationStateCreateInfo {
+    .depthClampEnable = VK_FALSE,
+    .rasterizerDiscardEnable = VK_FALSE,
+    .polygonMode = vk::PolygonMode::eFill,
+    .cullMode = vk::CullModeFlagBits::eBack,
+    .frontFace = vk::FrontFace::eClockwise,
+    .lineWidth = 1.0f,};
+
+  vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo {
+    .rasterizationSamples = vk::SampleCountFlagBits::e1};
+
+  vk::StencilOpState stencilOpState {
+    .failOp = vk::StencilOp::eKeep,
+    .passOp = vk::StencilOp::eKeep,
+    .depthFailOp = vk::StencilOp::eKeep,
+    .compareOp = vk::CompareOp::eAlways,
+  };
+
+  vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo {
+    .depthTestEnable = true,
+    .depthWriteEnable = true,
+    .depthCompareOp = vk::CompareOp::eLessOrEqual,
+    .depthBoundsTestEnable = false,
+    .stencilTestEnable = false,
+    .front = stencilOpState,
+    .back = stencilOpState
+  };
+
+  vk::ColorComponentFlags colorComponentFlags(
+    vk::ColorComponentFlagBits::eR
+    | vk::ColorComponentFlagBits::eG
+    | vk::ColorComponentFlagBits::eB
+    | vk::ColorComponentFlagBits::eA);
+
+  vk::PipelineColorBlendAttachmentState pipelineColorBlendAttachmentState {
+    .blendEnable = false,
+    .srcColorBlendFactor = vk::BlendFactor::eZero,
+    .dstColorBlendFactor = vk::BlendFactor::eZero,
+    .colorBlendOp = vk::BlendOp::eAdd,
+    .srcAlphaBlendFactor = vk::BlendFactor::eZero,
+    .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+    .alphaBlendOp = vk::BlendOp::eAdd,
+    .colorWriteMask = colorComponentFlags,
+  };
+
+  vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo{
+    .logicOpEnable = VK_FALSE,
+    .logicOp = vk::LogicOp::eNoOp,
+    .attachmentCount = 1,
+    .pAttachments = &pipelineColorBlendAttachmentState,\
+    .blendConstants = {{1.0f, 1.0f,1.0f,1.0f}}
+  };
+
+  std::array dynamicStates = {
+    vk::DynamicState::eViewport,
+    vk::DynamicState::eScissor
+  };
+
+  vk::PipelineDynamicStateCreateInfo pipelineDynamicStateCreateInfo{
+    .dynamicStateCount = dynamicStates.size(),
+    .pDynamicStates = dynamicStates.data()
+  };
+
+  _pipeline = vkr::Pipeline(
+    _device,
+    nullptr,
+    vk::GraphicsPipelineCreateInfo {
+      .stageCount = pipelineShaderStageCreateInfos.size(),
+      .pStages = pipelineShaderStageCreateInfos.data(),
+      .pVertexInputState = &vertexInputStateCreateInfo,
+      .pInputAssemblyState = &inputAssemblyStateCreateInfo,
+      .pTessellationState = nullptr,
+      .pViewportState = &viewportStateCreateInfo,
+      .pRasterizationState = &rasterizationStateCreateInfo,
+      .pMultisampleState = &multisampleStateCreateInfo,
+      .pDepthStencilState = &depthStencilStateCreateInfo,
+      .pColorBlendState = &colorBlendStateCreateInfo,
+      .pDynamicState = &pipelineDynamicStateCreateInfo,
+      .layout = *_pipelineLayout,
+      .renderPass = *_renderPass});
+
 }
 
 void Renderer::commands()
@@ -481,8 +681,15 @@ void Renderer::commands()
     _device,
     vk::CommandBufferAllocateInfo {
       .commandPool = *_commandPool,
-      .level = vk::CommandBufferLevel::ePrimary
+      .level = vk::CommandBufferLevel::ePrimary,
+      .commandBufferCount = 1,
     });
+
+  _graphicsQueue = vkr::Queue(
+    _device, _queueFamilyHints.graphicsFamily.value(), 0);
+
+  _presentQueue = vkr::Queue(
+    _device, _queueFamilyHints.presentFamily.value(), 0);
 }
 
 void Renderer::setup()
@@ -549,5 +756,4 @@ void Renderer::setup()
   vkr::DebugUtilsMessengerEXT debugMessenger(
     _instance, debugMessengerInfo);
 }
-
 } // namespace vulkan

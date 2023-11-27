@@ -8,10 +8,10 @@ layout (std140, set = 0, binding = 0) uniform buf {
 } ubuf;
 
 layout (location = 0) in vec4 pos;
-layout (location = 1) in vec2 inTexCoords;
-layout (location = 0) out vec2 texcoord;
+//layout (location = 1) in vec2 inTexCoords;
+//layout (location = 0) out vec2 texcoord;
 
 void main() {
-    texcoord = inTexCoords;
+    //texcoord = inTexCoords;
     gl_Position = ubuf.mvp * pos;
 }

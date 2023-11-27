@@ -52,6 +52,9 @@ public:
   //! Setup uniform buffer.
   void uniformBuffer();
 
+  //! Setup vertex buffer.
+  void vertexBuffer();
+
   //! Setup pipeline.
   void pipeline();
 
@@ -67,23 +70,23 @@ public:
   //! Setup
   void setup();
 
-private:
+public:
   const vkr::Context _ctx {};
   vkr::Instance _instance { nullptr };
   vkr::PhysicalDevice _physicalDevice { nullptr };
   vkr::Device _device { nullptr };
 
-private:
+  vkr::Queue _graphicsQueue { nullptr };
+  vkr::Queue _presentQueue { nullptr };
+
   vkr::CommandPool _commandPool { nullptr };
   vkr::CommandBuffers _commandBuffers { nullptr };
 
-private:
   vkr::Image _depthImage { nullptr };
   vk::Format _depthImageFormat {};
   vkr::ImageView _depthImageView { nullptr };
   vkr::DeviceMemory _depthMemory { nullptr };
 
-private:
   vkr::DeviceMemory _uniformBufferMemory { nullptr };
   vkr::Buffer _uniformBuffer { nullptr };
 
@@ -91,7 +94,9 @@ private:
   vkr::DescriptorPool _uniformDescriptorPool { nullptr };
   vkr::DescriptorSets _uniformDescriptorSets { nullptr };
 
-private:
+  vkr::DeviceMemory _vertexBufferMemory { nullptr };
+  vkr::Buffer _vertexBuffer { nullptr };
+
   vkr::SurfaceKHR _surface { nullptr };
   vk::SurfaceCapabilitiesKHR _surfaceCapabilities {};
   vkr::SwapchainKHR _swapChain { nullptr };
@@ -99,11 +104,10 @@ private:
   vk::Format _surfaceImageFormat {};
   std::vector<vkr::Framebuffer> _framebuffers;
 
-private:
   vkr::RenderPass _renderPass { nullptr };
+  vkr::Pipeline _pipeline { nullptr };
   vkr::PipelineLayout _pipelineLayout { nullptr };
 
-private:
   vkr::ShaderModule _fragmentShader { nullptr };
   vkr::ShaderModule _vertexShader { nullptr };
 
@@ -166,15 +170,124 @@ public:
     _renderer.physicalDevice();
     _renderer.logicalDevice();
 
+    _renderer.shaders();
+
     _renderer.swapChain();
-    _renderer.framebuffers();
+
     _renderer.depthBuffer();
     _renderer.uniformBuffer();
-    _renderer.pipeline();
-    _renderer.shaders();
+    _renderer.vertexBuffer();
+
     _renderer.renderPass();
 
+    _renderer.framebuffers();
+
+    _renderer.pipeline();
+
     _renderer.commands();
+
+    vkr::Semaphore imageAcquiredSemaphore(
+      _renderer._device,
+      vk::SemaphoreCreateInfo {});
+
+    auto [result, imageIndex] = _renderer._swapChain.acquireNextImage(
+      0, *imageAcquiredSemaphore);
+
+    assert(result == vk::Result::eSuccess);
+    assert(imageIndex < _renderer._swapChainImageViews.size());
+
+    auto& commandBuffer = _renderer._commandBuffers.front();
+    commandBuffer.begin({});
+
+    std::array clearValues {
+      vk::ClearValue {
+        .color = vk::ClearColorValue {
+          .float32 = {{ 0.2f, 0.2f, 0.2f, 0.2f}}
+        }
+      },
+      vk::ClearValue {
+        .depthStencil = vk::ClearDepthStencilValue {
+          .depth = 1.0f,
+          .stencil = 0,
+        }
+      }
+    };
+
+    vk::RenderPassBeginInfo renderPassBeginInfo {
+      .renderPass = *_renderer._renderPass,
+      .framebuffer = *_renderer._framebuffers[imageIndex],
+      .renderArea = vk::Rect2D {
+        .offset = {0, 0},
+        .extent = _renderer._surfaceCapabilities.currentExtent
+      },
+      .clearValueCount = clearValues.size(),
+      .pClearValues = clearValues.data()
+    };
+
+    commandBuffer.beginRenderPass(
+      renderPassBeginInfo, vk::SubpassContents::eInline);
+    commandBuffer.bindPipeline(
+      vk::PipelineBindPoint::eGraphics,
+      *_renderer._pipeline);
+    commandBuffer.bindDescriptorSets(
+      vk::PipelineBindPoint::eGraphics,
+      *_renderer._pipelineLayout,
+      0,
+      *_renderer._uniformDescriptorSets.front(),
+      nullptr);
+    commandBuffer.bindVertexBuffers(
+      0, {*_renderer._vertexBuffer}, {0});
+
+    // Dynamic state
+    commandBuffer.setScissor(
+      0, vk::Rect2D(vk::Offset2D( 0, 0 ), _renderer._surfaceCapabilities.currentExtent));
+    commandBuffer.setViewport(
+      0, vk::Viewport(
+           0.0f,
+           0.0f,
+           static_cast<float>(_renderer._surfaceCapabilities.currentExtent.width),
+           static_cast<float>(_renderer._surfaceCapabilities.currentExtent.height),
+           0.0f,
+           1.0f)
+      );
+
+    // State
+
+    commandBuffer.draw( 12 * 4, 1, 0, 0 );
+    commandBuffer.endRenderPass();
+    commandBuffer.end();
+
+    vkr::Fence drawFence(
+      _renderer._device, vk::FenceCreateInfo());
+
+    vk::PipelineStageFlags waitDestinationStageMask(
+      vk::PipelineStageFlagBits::eColorAttachmentOutput);
+
+    vk::SubmitInfo submitInfo {
+      .pWaitSemaphores = &(*imageAcquiredSemaphore),
+      .pWaitDstStageMask = &waitDestinationStageMask,
+      .commandBufferCount = 1,
+      .pCommandBuffers = &(*commandBuffer),
+    };
+
+    _renderer._graphicsQueue.submit(submitInfo, *drawFence);
+
+    while ( vk::Result::eTimeout == _renderer._device.waitForFences( { *drawFence }, VK_TRUE, 0 ) )
+      ;
+
+    vk::PresentInfoKHR presentInfoKHR {
+      .swapchainCount = 1,
+      .pSwapchains = &(*_renderer._swapChain),
+      .pImageIndices = &imageIndex
+    };
+    result = _renderer._presentQueue.presentKHR( presentInfoKHR );
+
+    switch ( result )
+    {
+      case vk::Result::eSuccess: break;
+      case vk::Result::eSuboptimalKHR: printf("vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR !\n"); break;
+      default: assert( false );  // an unexpected result is returned !
+    }
 
     while(!glfwWindowShouldClose(_display._window))
     {
