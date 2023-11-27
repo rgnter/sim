@@ -166,6 +166,30 @@ void Renderer::swapChain()
 
 }
 
+void Renderer::framebuffers()
+{
+  _framebuffers.reserve(_swapChainImageViews.size());
+
+  for (const auto& swapChainImageView : _swapChainImageViews)
+  {
+    std::array framebufferAttachements = {
+      *swapChainImageView,
+      *_depthImageView,
+    };
+
+    _framebuffers.emplace_back(
+      _device,
+      vk::FramebufferCreateInfo {
+        .renderPass = *_renderPass,
+        .attachmentCount = framebufferAttachements.size(),
+        .pAttachments = framebufferAttachements.data(),
+        .width = _surfaceCapabilities.currentExtent.width,
+        .height = _surfaceCapabilities.currentExtent.height,
+        .layers = 1
+      });
+  }
+}
+
 void Renderer::depthBuffer()
 {
   _depthImageFormat = vk::Format::eD16Unorm;
@@ -355,6 +379,42 @@ void Renderer::renderPass()
       .pAttachments = attachmentDescriptions.data(),
       .subpassCount = 1,
       .pSubpasses = &subpassDescription});
+}
+
+
+void Renderer::shaders()
+{
+  const auto readSpvBinary = [](const std::filesystem::path& shaderBinaryPath) {
+    const auto size = std::filesystem::file_size(shaderBinaryPath);
+    std::ifstream input(shaderBinaryPath, std::ios::binary);
+    if (input.bad())
+      throw std::runtime_error(
+        std::format("Couldn't find shader at '{}'", shaderBinaryPath.c_str()));
+
+    std::vector<uint8_t> buffer(size);
+    input.read(reinterpret_cast<char*>(buffer.data()), size);
+    return std::pair{buffer, size};
+  };
+
+  const auto [vertexData, vertexLength] = readSpvBinary("cube-vert.spv");
+  const auto [fragmentData, fragmentLength] = readSpvBinary("cube-frag.spv");
+
+  assert(vertexData.capacity() % sizeof(uint32_t) == 0);
+  assert(fragmentData.capacity() % sizeof(uint32_t) == 0);
+
+  _vertexShader = vkr::ShaderModule(
+    _device,
+    vk::ShaderModuleCreateInfo{
+      .codeSize = vertexLength,
+      .pCode = reinterpret_cast<const uint32_t*>(vertexData.data())
+    });
+
+  _fragmentShader = vkr::ShaderModule(
+    _device,
+    vk::ShaderModuleCreateInfo{
+      .codeSize = fragmentLength,
+      .pCode = reinterpret_cast<const uint32_t*>(fragmentData.data())
+    });
 }
 
 void Renderer::pipeline()
