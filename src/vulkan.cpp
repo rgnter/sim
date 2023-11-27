@@ -75,10 +75,11 @@ void Renderer::swapChain()
 {
   const auto surfaceFormats
     = _physicalDevice.getSurfaceFormatsKHR(*_surface);
+
   if (surfaceFormats.empty())
     throw std::runtime_error("No surface formats supported.");
 
-  const auto& imageFormat = surfaceFormats.front().format == vk::Format::eUndefined
+  _surfaceImageFormat = surfaceFormats.front().format == vk::Format::eUndefined
                               ? vk::Format::eB8G8R8A8Unorm
                               : surfaceFormats.front().format;
 
@@ -100,36 +101,34 @@ void Renderer::swapChain()
           ? vk::CompositeAlphaFlagBitsKHR::ePostMultiplied : _surfaceCapabilities.supportedCompositeAlpha & vk::CompositeAlphaFlagBitsKHR::eInherit
               ? vk::CompositeAlphaFlagBitsKHR::eInherit : vk::CompositeAlphaFlagBitsKHR::eOpaque;
 
-  vk::SwapchainCreateInfoKHR swapChainCreateInfo {
-    .surface = *_surface,
-    .minImageCount = _surfaceCapabilities.minImageCount,
-    .imageFormat = imageFormat,
-    .imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
-    .imageExtent = swapChainExtent,
-    .imageArrayLayers = 1,
-    .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
-    .imageSharingMode = vk::SharingMode::eExclusive,
-    .preTransform = preTransform,
-    .compositeAlpha = compositeAlpha,
-    .presentMode = swapChainPresentMode,
-    .clipped = true,
-  };
-
   _swapChain = vkr::SwapchainKHR(
-    _device, swapChainCreateInfo);
+    _device,
+    vk::SwapchainCreateInfoKHR {
+      .surface = *_surface,
+      .minImageCount = _surfaceCapabilities.minImageCount,
+      .imageFormat = _surfaceImageFormat,
+      .imageColorSpace = vk::ColorSpaceKHR::eSrgbNonlinear,
+      .imageExtent = swapChainExtent,
+      .imageArrayLayers = 1,
+      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+      .imageSharingMode = vk::SharingMode::eExclusive,
+      .preTransform = preTransform,
+      .compositeAlpha = compositeAlpha,
+      .presentMode = swapChainPresentMode,
+      .clipped = true,
+    });
 
   const auto swapChainImages = _swapChain.getImages();
-  std::vector<vkr::ImageView> swapChainImageViews;
-  swapChainImageViews.reserve(swapChainImages.size());
+  _swapChainImageViews.reserve(swapChainImages.size());
 
   for (const auto& image : swapChainImages)
   {
-    swapChainImageViews.emplace_back(
+    _swapChainImageViews.emplace_back(
       _device,
       vk::ImageViewCreateInfo {
         .image = image,
         .viewType = vk::ImageViewType::e2D,
-        .format = imageFormat,
+        .format = _surfaceImageFormat,
         .subresourceRange = {
           .aspectMask = vk::ImageAspectFlagBits::eColor,
           .baseMipLevel = 0,
@@ -144,9 +143,9 @@ void Renderer::swapChain()
 
 void Renderer::depthBuffer()
 {
-  const vk::Format depthFormat = vk::Format::eD16Unorm;
+  _depthImageFormat = vk::Format::eD16Unorm;
   const vk::FormatProperties formatProperties
-    = _physicalDevice.getFormatProperties(depthFormat);
+    = _physicalDevice.getFormatProperties(_depthImageFormat);
 
   // Determine tiling available for depth buffer
   vk::ImageTiling imageTiling;
@@ -161,7 +160,7 @@ void Renderer::depthBuffer()
     _device,
     vk::ImageCreateInfo {
       .imageType = vk::ImageType::e2D,
-      .format = depthFormat,
+      .format = _depthImageFormat,
       .extent = vk::Extent3D {
         .width = _surfaceCapabilities.currentExtent.width,
         .height = _surfaceCapabilities.currentExtent.height,
@@ -180,7 +179,7 @@ void Renderer::depthBuffer()
     = _depthImage.getMemoryRequirements();
 
   uint32_t memoryTypeBits = memoryRequirements.memoryTypeBits;
-  uint32_t memoryTypeIndex = uint32_t( ~0 );
+  auto memoryTypeIndex = uint32_t( ~0 );
   for ( uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++ )
   {
     const auto& memoryType = memoryProperties.memoryTypes[i];
@@ -206,7 +205,7 @@ void Renderer::depthBuffer()
     vk::ImageViewCreateInfo {
       .image = *_depthImage,
       .viewType = vk::ImageViewType::e2D,
-      .format = depthFormat,
+      .format = _depthImageFormat,
       .subresourceRange = {
         .aspectMask = vk::ImageAspectFlagBits::eDepth,
         .baseMipLevel = 0,
@@ -281,6 +280,106 @@ void Renderer::uniformBuffer()
   _uniformBuffer.bindMemory(*_uniformBufferMemory, 0);
 }
 
+void Renderer::renderPass()
+{
+  std::array<vk::AttachmentDescription, 2> attachmentDescriptions = {
+    // Surface attachment
+    vk::AttachmentDescription {
+      .format = _surfaceImageFormat,
+      .samples = vk::SampleCountFlagBits::e1,
+      .loadOp = vk::AttachmentLoadOp::eClear,
+      .storeOp = vk::AttachmentStoreOp::eStore,
+      .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+      .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+      .initialLayout = vk::ImageLayout::eUndefined,
+      .finalLayout = vk::ImageLayout::ePresentSrcKHR},
+    // Depth attachment
+    vk::AttachmentDescription {
+      .format = _depthImageFormat,
+      .samples = vk::SampleCountFlagBits::e1,
+      .loadOp = vk::AttachmentLoadOp::eClear,
+      .storeOp = vk::AttachmentStoreOp::eDontCare,
+      .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+      .stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+      .initialLayout = vk::ImageLayout::eUndefined,
+      .finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal},
+  };
+
+  const vk::AttachmentReference surfaceAttachmentReference =  {
+    .attachment = 0,
+    .layout = vk::ImageLayout::eColorAttachmentOptimal};
+
+  const vk::AttachmentReference depthAttachmentReference =  {
+    .attachment = 1,
+    .layout = vk::ImageLayout::eDepthAttachmentOptimal};
+
+  const vk::SubpassDescription subpassDescription = {
+    .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+    .colorAttachmentCount = 1,
+    .pColorAttachments = &surfaceAttachmentReference,
+    .pDepthStencilAttachment = &depthAttachmentReference};
+
+  _renderPass = vkr::RenderPass(
+    _device,
+    vk::RenderPassCreateInfo {
+      .attachmentCount = 2,
+      .pAttachments = attachmentDescriptions.data(),
+      .subpassCount = 1,
+      .pSubpasses = &subpassDescription});
+}
+
+void Renderer::pipeline()
+{
+  const vk::DescriptorSetLayoutBinding uniformDescriptorSetLayoutBinding {
+    .descriptorType = vk::DescriptorType::eUniformBuffer,
+    .descriptorCount = 1,
+    .stageFlags = vk::ShaderStageFlagBits::eVertex};
+
+  _uniformDescriptorLayout = vkr::DescriptorSetLayout(
+    _device,
+    vk::DescriptorSetLayoutCreateInfo {
+      .bindingCount = 1,
+      .pBindings = &uniformDescriptorSetLayoutBinding});
+
+  _pipelineLayout = vkr::PipelineLayout(
+    _device,
+    vk::PipelineLayoutCreateInfo {
+      .setLayoutCount = 1,
+      .pSetLayouts = &(*_uniformDescriptorLayout),});
+
+  const vk::DescriptorPoolSize uniformDescriptorPoolSize{
+    .type = vk::DescriptorType::eUniformBuffer,
+    .descriptorCount = 1};
+
+  _uniformDescriptorPool = vkr::DescriptorPool(
+    _device,
+    vk::DescriptorPoolCreateInfo {
+      .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+      .maxSets = 1,
+      .poolSizeCount = 1,
+      .pPoolSizes = &uniformDescriptorPoolSize});
+
+  _uniformDescriptorSets = vkr::DescriptorSets(
+    _device,
+    vk::DescriptorSetAllocateInfo {
+      .descriptorPool = *_uniformDescriptorPool,
+      .descriptorSetCount = 1,
+      .pSetLayouts = &(*_uniformDescriptorLayout)});
+
+  const vk::DescriptorBufferInfo uniformDescriptorBufferInfo{
+    .buffer = *_uniformBuffer,
+    .offset = 0,
+    .range = sizeof( glm::mat4x4 )};
+
+  const vk::WriteDescriptorSet writeUniformDescriptorSet {
+    .dstSet = *_uniformDescriptorSets.front(),
+    .descriptorCount = 1,
+    .descriptorType = vk::DescriptorType::eUniformBuffer,
+    .pBufferInfo = &uniformDescriptorBufferInfo};
+
+  _device.updateDescriptorSets(writeUniformDescriptorSet, nullptr);
+}
+
 void Renderer::commands()
 {
   _commandPool = vkr::CommandPool(
@@ -299,27 +398,12 @@ void Renderer::commands()
 
 void Renderer::setup()
 {
-  const vk::DebugUtilsMessengerCreateInfoEXT debugMessengerInfo = {
-    .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
-                       | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning
-                       | vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose,
-    .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral
-                   | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
-                   | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation,
-    .pfnUserCallback = [](
-      VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-      VkDebugUtilsMessageTypeFlagsEXT messageTypes,
-      const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-      void* pUserData) -> VkBool32
-    {
-      printf("[Vulkan] %s\n", pCallbackData->pMessage);
-      return VK_FALSE;
-    }};
+
   _extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   _extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
+  _layers.emplace_back("VK_LAYER_KHRONOS_validation");
 
   const vk::ApplicationInfo applicationInfo {
-    .pNext = &debugMessengerInfo,
     .pApplicationName = "Hello World",
     .applicationVersion = 1,
     .pEngineName = "Engine",
@@ -343,7 +427,25 @@ void Renderer::setup()
     layers.emplace_back(layer.data());
   }
 
+  const vk::DebugUtilsMessengerCreateInfoEXT debugMessengerInfo = {
+    .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+                       | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning
+                       | vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose,
+    .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral
+                   | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
+                   | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation,
+    .pfnUserCallback = [](
+                         VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                         VkDebugUtilsMessageTypeFlagsEXT messageTypes,
+                         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
+                         void* pUserData) -> VkBool32
+    {
+      printf("[Vulkan] %s\n", pCallbackData->pMessage);
+      return VK_FALSE;
+    }};
+
   const vk::InstanceCreateInfo instanceCreateInfo {
+    .pNext = &debugMessengerInfo,
     .pApplicationInfo = &applicationInfo,
     .enabledLayerCount = static_cast<uint32_t>(layers.size()),
     .ppEnabledLayerNames = layers.data(),

@@ -13,6 +13,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <string_view>
+#include <array>
 #include <vector>
 
 namespace vulkan
@@ -44,6 +45,12 @@ public:
   //! Setup uniform buffer.
   void uniformBuffer();
 
+  //! Setup pipeline.
+  void pipeline();
+
+  //! Setup render pass.
+  void renderPass();
+
   //! Setup command pool and command buffers.
   void commands();
 
@@ -62,6 +69,7 @@ private:
 
 private:
   vkr::Image _depthImage { nullptr };
+  vk::Format _depthImageFormat {};
   vkr::ImageView _depthImageView { nullptr };
   vkr::DeviceMemory _depthMemory { nullptr };
 
@@ -69,10 +77,20 @@ private:
   vkr::DeviceMemory _uniformBufferMemory { nullptr };
   vkr::Buffer _uniformBuffer { nullptr };
 
+  vkr::DescriptorSetLayout _uniformDescriptorLayout { nullptr };
+  vkr::DescriptorPool _uniformDescriptorPool { nullptr };
+  vkr::DescriptorSets _uniformDescriptorSets { nullptr };
+
+private:
+  vkr::RenderPass _renderPass { nullptr };
+  vkr::PipelineLayout _pipelineLayout { nullptr };
+
 private:
   vkr::SurfaceKHR _surface { nullptr };
   vk::SurfaceCapabilitiesKHR _surfaceCapabilities {};
   vkr::SwapchainKHR _swapChain { nullptr };
+  std::vector<vkr::ImageView> _swapChainImageViews;
+  vk::Format _surfaceImageFormat {};
 
 private:
   struct QueueFamilyHints
@@ -132,8 +150,13 @@ public:
     _renderer.surface(_display._window);
     _renderer.physicalDevice();
     _renderer.logicalDevice();
-    _renderer.depthBuffer();
+
     _renderer.swapChain();
+    _renderer.depthBuffer();
+    _renderer.uniformBuffer();
+    _renderer.pipeline();
+    _renderer.renderPass();
+
     _renderer.commands();
 
     while(!glfwWindowShouldClose(_display._window))
