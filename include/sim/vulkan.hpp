@@ -253,7 +253,7 @@ public:
 
     // State
 
-    commandBuffer.draw( 12 * 4, 1, 0, 0 );
+    commandBuffer.draw( 24, 1, 0, 0 );
     commandBuffer.endRenderPass();
     commandBuffer.end();
 

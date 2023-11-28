@@ -99,7 +99,7 @@ void Renderer::swapChain()
   const vk::Extent2D swapChainExtent =
     _surfaceCapabilities.currentExtent;
 
-  const vk::PresentModeKHR swapChainPresentMode
+  const auto swapChainPresentMode
     = vk::PresentModeKHR::eFifo;
 
   const vk::SurfaceTransformFlagBitsKHR preTransform =
@@ -126,7 +126,7 @@ void Renderer::swapChain()
       .presentMode = swapChainPresentMode,
       .clipped = true};
 
-  std::array queueFamilyIndices = {
+  const std::array queueFamilyIndices = {
     _queueFamilyHints.graphicsFamily.value(),
     _queueFamilyHints.presentFamily.value()};
 
@@ -163,7 +163,6 @@ void Renderer::swapChain()
         },
       });
   }
-
 }
 
 void Renderer::framebuffers()
@@ -229,7 +228,7 @@ void Renderer::depthBuffer()
     = _depthImage.getMemoryRequirements();
 
   uint32_t memoryTypeBits = memoryRequirements.memoryTypeBits;
-  auto memoryTypeIndex = uint32_t( ~0 );
+  uint32_t memoryTypeIndex = ~0;
   for ( uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++ )
   {
     const auto& memoryType = memoryProperties.memoryTypes[i];
@@ -241,7 +240,7 @@ void Renderer::depthBuffer()
     }
     memoryTypeBits >>= 1;
   }
-  assert(memoryTypeIndex != uint32_t( ~0 ) );
+  assert(memoryTypeIndex != ~0);
 
   _depthMemory = vkr::DeviceMemory (
     _device,
@@ -334,45 +333,56 @@ void Renderer::uniformBuffer()
   _uniformBuffer.bindMemory(*_uniformBufferMemory, 0);
 }
 
+struct Mesh
+{
+  struct Vertex
+  {
+    glm::vec3 pos;
+  };
+
+  const std::array<Vertex, 24> verticies = {
+      // front
+      Vertex{{-1.0f, -1.0f, +1.0f}},
+      {{+1.0f, -1.0f, +1.0f}},
+      {{-1.0f, +1.0f, +1.0f}},
+      {{+1.0f, +1.0f, +1.0f}},
+      // back
+      {{+1.0f, -1.0f, -1.0f}},
+      {{-1.0f, -1.0f, -1.0f}},
+      {{+1.0f, +1.0f, -1.0f}},
+      {{-1.0f, +1.0f, -1.0f}},
+      // right
+      {{+1.0f, -1.0f, +1.0f}},
+      {{+1.0f, -1.0f, -1.0f}},
+      {{+1.0f, +1.0f, +1.0f}},
+      {{+1.0f, +1.0f, -1.0f}},
+      // left
+      {{-1.0f, -1.0f, -1.0f}},
+      {{-1.0f, -1.0f, +1.0f}},
+      {{-1.0f, +1.0f, -1.0f}},
+      {{-1.0f, +1.0f, +1.0f}},
+      // top
+      {{-1.0f, +1.0f, +1.0f}},
+      {{+1.0f, +1.0f, +1.0f}},
+      {{-1.0f, +1.0f, -1.0f}},
+      {{+1.0f, +1.0f, -1.0f}},
+      // bottom
+      {{-1.0f, -1.0f, -1.0f}},
+      {{+1.0f, -1.0f, -1.0f}},
+      {{-1.0f, -1.0f, +1.0f}},
+      {{+1.0f, -1.0f, +1.0f}}
+  };
+
+} cube;
+
 void Renderer::vertexBuffer()
 {
-  static const float verticies[] = {
-    // front
-    -1.0f, -1.0f, +1.0f,
-    +1.0f, -1.0f, +1.0f,
-    -1.0f, +1.0f, +1.0f,
-    +1.0f, +1.0f, +1.0f,
-    // back
-    +1.0f, -1.0f, -1.0f,
-    -1.0f, -1.0f, -1.0f,
-    +1.0f, +1.0f, -1.0f,
-    -1.0f, +1.0f, -1.0f,
-    // right
-    +1.0f, -1.0f, +1.0f,
-    +1.0f, -1.0f, -1.0f,
-    +1.0f, +1.0f, +1.0f,
-    +1.0f, +1.0f, -1.0f,
-    // left
-    -1.0f, -1.0f, -1.0f,
-    -1.0f, -1.0f, +1.0f,
-    -1.0f, +1.0f, -1.0f,
-    -1.0f, +1.0f, +1.0f,
-    // top
-    -1.0f, +1.0f, +1.0f,
-    +1.0f, +1.0f, +1.0f,
-    -1.0f, +1.0f, -1.0f,
-    +1.0f, +1.0f, -1.0f,
-    // bottom
-    -1.0f, -1.0f, -1.0f,
-    +1.0f, -1.0f, -1.0f,
-    -1.0f, -1.0f, +1.0f,
-    +1.0f, -1.0f, +1.0f
-  };
+
 
   _vertexBuffer = vkr::Buffer(
     _device,
     vk::BufferCreateInfo {
-      .size = sizeof(verticies),
+      .size = cube.verticies.size() * sizeof(Mesh::Vertex),
       .usage = vk::BufferUsageFlagBits::eVertexBuffer,
       .sharingMode = vk::SharingMode::eExclusive,});
 
@@ -405,14 +415,14 @@ void Renderer::vertexBuffer()
 
   auto memory = static_cast<uint8_t*>(
     _vertexBufferMemory.mapMemory(0, memoryRequirements.size));
-  std::memcpy(memory, verticies, sizeof (verticies));
+  std::memcpy(memory, cube.verticies.data(), cube.verticies.size() * sizeof(Mesh::Vertex));
   _vertexBufferMemory.unmapMemory();
   _vertexBuffer.bindMemory(*_vertexBufferMemory, 0);
 }
 
 void Renderer::renderPass()
 {
-  std::array<vk::AttachmentDescription, 2> attachmentDescriptions = {
+  const std::array attachmentDescriptions = {
     // Surface attachment
     vk::AttachmentDescription {
       .format = _surfaceImageFormat,
@@ -557,24 +567,29 @@ void Renderer::pipeline()
     },
   };
 
-  vk::VertexInputBindingDescription vertexInputBindingDescription {
-    .binding = 0,
-    .stride = sizeof(float) * 3,
-    .inputRate = vk::VertexInputRate::eVertex,
-  };
+  std::array vertexBindingDescriptions {
+    vk::VertexInputBindingDescription {
+      .binding = 0,
+      .stride = sizeof(Mesh::Vertex),
+      .inputRate = vk::VertexInputRate::eVertex,
+    }};
 
   std::array vertexAttributeDescriptions {
     vk::VertexInputAttributeDescription {
       .location = 0,
       .binding = 0,
-      .format = vk::Format::eR32G32B32A32Sfloat,
+      .format = vk::Format::eR32G32B32Sfloat,
     },
-  };
+    /*vk::VertexInputAttributeDescription {
+      .location = 1,
+      .binding = 0,
+      .format = vk::Format::eR32G32B32Sfloat,
+    }*/};
 
   vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo {
-    .vertexBindingDescriptionCount = 1,
-    .pVertexBindingDescriptions = &vertexInputBindingDescription,
-    .vertexAttributeDescriptionCount = 1,
+    .vertexBindingDescriptionCount = vertexBindingDescriptions.size(),
+    .pVertexBindingDescriptions = vertexBindingDescriptions.data(),
+    .vertexAttributeDescriptionCount = vertexAttributeDescriptions.size(),
     .pVertexAttributeDescriptions = vertexAttributeDescriptions.data()};
 
   vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo {
@@ -694,7 +709,6 @@ void Renderer::commands()
 
 void Renderer::setup()
 {
-
   _extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   _extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
   _layers.emplace_back("VK_LAYER_KHRONOS_validation");
@@ -725,9 +739,11 @@ void Renderer::setup()
 
   const vk::DebugUtilsMessengerCreateInfoEXT debugMessengerInfo = {
     .messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
+                          | vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo
                        | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning
                        | vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose,
     .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral
+    | vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding
                    | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance
                    | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation,
     .pfnUserCallback = [](
