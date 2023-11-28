@@ -8,9 +8,8 @@
 #define VULKAN_HPP_NO_CONSTRUCTORS
 #include <vulkan/vulkan_raii.hpp>
 #include <GLFW/glfw3.h>
+#include "sim/engine.hpp"
 
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
 
 #include <string_view>
 #include <filesystem>
@@ -158,12 +157,78 @@ public:
   int height = 600;
 };
 
+
+static constexpr int32_t MaxFramesInFlight = 2;
+
+class InFlightRendering
+{
+public:
+  explicit InFlightRendering(const Renderer& renderer);
+  /**
+   * Draws frame.
+   */
+  void draw();
+
+private:
+  /**
+   * Renders image in swapchain.
+   */
+  void render();
+
+  /**
+   * Presents rendered image to surface.
+   */
+  void present();
+
+private:
+private:
+  const Renderer& _renderer;
+
+  std::array<vkr::Semaphore, MaxFramesInFlight> _imageAvailableSemaphores
+    {
+      vkr::Semaphore { nullptr }, vkr::Semaphore { nullptr }
+    };
+
+  std::array<vkr::Semaphore, MaxFramesInFlight> _imageRenderedSemaphores
+    {
+      vkr::Semaphore { nullptr }, vkr::Semaphore { nullptr }
+    };
+
+  std::array<vkr::Fence, MaxFramesInFlight> _inFlightFences
+    {
+      vkr::Fence { nullptr }, vkr::Fence { nullptr }
+    };
+
+  std::array<vk::ClearValue, MaxFramesInFlight> _clearValues {};
+
+private:
+  uint32_t _inFlightFrameIndex = 0;
+  uint32_t _currentImageIndex = 0;
+};
+
+
+
+
 class Engine
 {
 
 public:
-  void run()
+  void run(sdk::State& state)
   {
+    auto& camera = state.getActiveCamera();
+    auto model = glm::mat4x4( 1.0f );
+
+    const auto view = glm::lookAt(
+      camera._position,
+      glm::vec3(0.0f, 0.0f, 0.0f),
+      glm::vec3(0.0f, -1.0f, 0.0f));
+
+    const auto clip = glm::mat4x4(
+      1.0f,  0.0f, 0.0f, 0.0f,
+      0.0f, -1.0f, 0.0f, 0.0f,
+      0.0f,  0.0f, 0.5f, 0.0f,
+      0.0f,  0.0f, 0.5f, 1.0f);  // vulkan clip space has inverted y and half z !
+
     _display.setup(_renderer);
     _renderer.setup();
     _renderer.surface(_display._window);
@@ -186,116 +251,53 @@ public:
 
     _renderer.commands();
 
-    vkr::Semaphore imageAcquiredSemaphore(
-      _renderer._device,
-      vk::SemaphoreCreateInfo {});
 
-    auto [result, imageIndex] = _renderer._swapChain.acquireNextImage(
-      0, *imageAcquiredSemaphore);
+    InFlightRendering rendering(_renderer);
 
-    assert(result == vk::Result::eSuccess);
-    assert(imageIndex < _renderer._swapChainImageViews.size());
-
-    auto& commandBuffer = _renderer._commandBuffers.front();
-    commandBuffer.begin({});
-
-    std::array clearValues {
-      vk::ClearValue {
-        .color = vk::ClearColorValue {
-          .float32 = {{ 0.2f, 0.2f, 0.2f, 0.2f}}
-        }
-      },
-      vk::ClearValue {
-        .depthStencil = vk::ClearDepthStencilValue {
-          .depth = 1.0f,
-          .stencil = 0,
-        }
-      }
-    };
-
-    vk::RenderPassBeginInfo renderPassBeginInfo {
-      .renderPass = *_renderer._renderPass,
-      .framebuffer = *_renderer._framebuffers[imageIndex],
-      .renderArea = vk::Rect2D {
-        .offset = {0, 0},
-        .extent = _renderer._surfaceCapabilities.currentExtent
-      },
-      .clearValueCount = clearValues.size(),
-      .pClearValues = clearValues.data()
-    };
-
-    commandBuffer.beginRenderPass(
-      renderPassBeginInfo, vk::SubpassContents::eInline);
-    commandBuffer.bindPipeline(
-      vk::PipelineBindPoint::eGraphics,
-      *_renderer._pipeline);
-    commandBuffer.bindDescriptorSets(
-      vk::PipelineBindPoint::eGraphics,
-      *_renderer._pipelineLayout,
-      0,
-      *_renderer._uniformDescriptorSets.front(),
-      nullptr);
-    commandBuffer.bindVertexBuffers(
-      0, {*_renderer._vertexBuffer}, {0});
-
-    // Dynamic state
-    commandBuffer.setScissor(
-      0, vk::Rect2D(vk::Offset2D( 0, 0 ), _renderer._surfaceCapabilities.currentExtent));
-    commandBuffer.setViewport(
-      0, vk::Viewport(
-           0.0f,
-           0.0f,
-           static_cast<float>(_renderer._surfaceCapabilities.currentExtent.width),
-           static_cast<float>(_renderer._surfaceCapabilities.currentExtent.height),
-           0.0f,
-           1.0f)
-      );
-
-    // State
-
-    commandBuffer.draw( 24, 1, 0, 0 );
-    commandBuffer.endRenderPass();
-    commandBuffer.end();
-
-    vkr::Fence drawFence(
-      _renderer._device, vk::FenceCreateInfo());
-
-    vk::PipelineStageFlags waitDestinationStageMask(
-      vk::PipelineStageFlagBits::eColorAttachmentOutput);
-
-    vk::SubmitInfo submitInfo {
-      .pWaitSemaphores = &(*imageAcquiredSemaphore),
-      .pWaitDstStageMask = &waitDestinationStageMask,
-      .commandBufferCount = 1,
-      .pCommandBuffers = &(*commandBuffer),
-    };
-
-    _renderer._graphicsQueue.submit(submitInfo, *drawFence);
-
-    while ( vk::Result::eTimeout == _renderer._device.waitForFences( { *drawFence }, VK_TRUE, 0 ) )
-      ;
-
-    vk::PresentInfoKHR presentInfoKHR {
-      .swapchainCount = 1,
-      .pSwapchains = &(*_renderer._swapChain),
-      .pImageIndices = &imageIndex
-    };
-    result = _renderer._presentQueue.presentKHR( presentInfoKHR );
-
-    switch ( result )
-    {
-      case vk::Result::eSuccess: break;
-      case vk::Result::eSuboptimalKHR: printf("vk::Queue::presentKHR returned vk::Result::eSuboptimalKHR !\n"); break;
-      default: assert( false );  // an unexpected result is returned !
-    }
+    float rotationY = 0;
+    float rotationX = 0;
+    auto uniform = reinterpret_cast<glm::mat4x4*>(
+      _renderer._uniformBufferMemory.mapMemory(0, sizeof(glm::mat4x4)));
 
     while(!glfwWindowShouldClose(_display._window))
     {
       glfwPollEvents();
+
+      rotationY = 0;
+      rotationX = 0;
+
+      if(glfwGetKey(_display._window, GLFW_KEY_RIGHT) == GLFW_TRUE)
+      {
+        rotationY = -glm::radians<float>(1);
+      }
+      else if(glfwGetKey(_display._window, GLFW_KEY_LEFT) == GLFW_TRUE)
+      {
+        rotationY = glm::radians<float>(1);
+      }
+
+      if(glfwGetKey(_display._window, GLFW_KEY_UP) == GLFW_TRUE)
+      {
+        rotationX = -glm::radians<float>(1);
+      }
+      else if(glfwGetKey(_display._window, GLFW_KEY_DOWN) == GLFW_TRUE)
+      {
+        rotationX = glm::radians<float>(1);
+      }
+
+      if (rotationY)
+        model = glm::rotate(model, rotationY, {0,1,0});
+      if (rotationX)
+        model = glm::rotate(model, rotationX, {1,0,0});
+
+      *uniform = clip * camera._viewport._projection * view * model;
+
+      rendering.draw();
+
       if(glfwGetKey(_display._window, GLFW_KEY_ESCAPE))
       {
         glfwSetWindowShouldClose(_display._window, GLFW_TRUE);
       }
+
     }
   }
 

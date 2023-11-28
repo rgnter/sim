@@ -37,8 +37,9 @@ void Renderer::logicalDevice()
   const auto queueFamilyProperties
     = _physicalDevice.getQueueFamilyProperties();
 
+  int32_t index = 0;
   // Find queue families for graphics & present
-  for (int32_t index = 0; const auto& queueFamily: queueFamilyProperties)
+  for (const auto& queueFamily: queueFamilyProperties)
   {
     if (queueFamily.queueFlags & vk::QueueFlagBits::eGraphics)
     {
@@ -46,13 +47,13 @@ void Renderer::logicalDevice()
 
       const auto glfwSupport = glfwGetPhysicalDevicePresentationSupport(
         *_instance, *_physicalDevice, index);
-      if (_physicalDevice.getSurfaceSupportKHR(index, *_surface)
-          && glfwSupport == GLFW_TRUE)
+      if (_physicalDevice.getSurfaceSupportKHR(index, *_surface) && glfwSupport == GLFW_TRUE)
       {
         _queueFamilyHints.presentFamily = index;
       }
       index++;
     }
+  }
 
     if (!_queueFamilyHints.graphicsFamily || !_queueFamilyHints.presentFamily)
       throw std::runtime_error("No queue family supporting graphics and presentation found");
@@ -79,7 +80,6 @@ void Renderer::logicalDevice()
         .pQueueCreateInfos = &deviceQueueCreateInfo,
         .enabledExtensionCount = static_cast<uint32_t>(extensions.size()),
         .ppEnabledExtensionNames = extensions.data()});
-  }
 }
 
 void Renderer::swapChain()
@@ -269,31 +269,10 @@ void Renderer::depthBuffer()
 
 void Renderer::uniformBuffer()
 {
-  const auto model = glm::mat4x4( 1.0f );
-
-  const auto view = glm::lookAt(
-    glm::vec3(-5.0f, 3.0f, -10.0f),
-    glm::vec3(0.0f, 0.0f, 0.0f),
-    glm::vec3(0.0f, -1.0f, 0.0f));
-
-  const auto projection = glm::perspective(
-    glm::radians( 45.0f ),
-    1.0f,
-    0.1f,
-    100.0f);
-
-  const auto clip = glm::mat4x4(
-    1.0f,  0.0f, 0.0f, 0.0f,
-    0.0f, -1.0f, 0.0f, 0.0f,
-    0.0f,  0.0f, 0.5f, 0.0f,
-    0.0f,  0.0f, 0.5f, 1.0f);  // vulkan clip space has inverted y and half z !
-
-  const auto mvpc = clip * projection * view * model;
-
   _uniformBuffer =  vkr::Buffer(
     _device,
     vk::BufferCreateInfo {
-      .size = sizeof(mvpc),
+      .size = sizeof(glm::mat4x4),
       .usage = vk::BufferUsageFlagBits::eUniformBuffer,
       .sharingMode = vk::SharingMode::eExclusive
     });
@@ -324,11 +303,6 @@ void Renderer::uniformBuffer()
       .allocationSize = memoryRequirements.size,
       .memoryTypeIndex = memoryTypeIndex,
     });
-
-  auto* bufferData = static_cast<uint8_t*>(
-    _uniformBufferMemory.mapMemory(0, memoryRequirements.size));
-  std::memcpy(bufferData, &mvpc, sizeof(mvpc));
-  _uniformBufferMemory.unmapMemory();
 
   _uniformBuffer.bindMemory(*_uniformBufferMemory, 0);
 }
@@ -377,8 +351,6 @@ struct Mesh
 
 void Renderer::vertexBuffer()
 {
-
-
   _vertexBuffer = vkr::Buffer(
     _device,
     vk::BufferCreateInfo {
@@ -527,6 +499,7 @@ void Renderer::pipeline()
   const vk::DescriptorPoolSize uniformDescriptorPoolSize {
     .type = vk::DescriptorType::eUniformBuffer,
     .descriptorCount = 1};
+
   _uniformDescriptorPool = vkr::DescriptorPool(
     _device,
     vk::DescriptorPoolCreateInfo {
@@ -534,6 +507,7 @@ void Renderer::pipeline()
       .maxSets = 1,
       .poolSizeCount = 1,
       .pPoolSizes = &uniformDescriptorPoolSize});
+
   _uniformDescriptorSets = vkr::DescriptorSets(
     _device,
     vk::DescriptorSetAllocateInfo {
@@ -567,6 +541,7 @@ void Renderer::pipeline()
     },
   };
 
+  // Vertex buffer
   std::array vertexBindingDescriptions {
     vk::VertexInputBindingDescription {
       .binding = 0,
@@ -593,7 +568,7 @@ void Renderer::pipeline()
     .pVertexAttributeDescriptions = vertexAttributeDescriptions.data()};
 
   vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo {
-    .topology = vk::PrimitiveTopology::eTriangleList
+    .topology = vk::PrimitiveTopology::eTriangleStrip
   };
 
   vk::PipelineViewportStateCreateInfo viewportStateCreateInfo {
@@ -689,6 +664,7 @@ void Renderer::commands()
   _commandPool = vkr::CommandPool(
     _device,
     vk::CommandPoolCreateInfo {
+      .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
       .queueFamilyIndex = _queueFamilyHints.graphicsFamily.value()
     });
 
@@ -697,7 +673,7 @@ void Renderer::commands()
     vk::CommandBufferAllocateInfo {
       .commandPool = *_commandPool,
       .level = vk::CommandBufferLevel::ePrimary,
-      .commandBufferCount = 1,
+      .commandBufferCount = 2,
     });
 
   _graphicsQueue = vkr::Queue(
@@ -711,7 +687,8 @@ void Renderer::setup()
 {
   _extensions.emplace_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   _extensions.emplace_back(VK_KHR_SURFACE_EXTENSION_NAME);
-  _layers.emplace_back("VK_LAYER_KHRONOS_validation");
+  //_layers.emplace_back("VK_LAYER_KHRONOS_validation");
+  //_layers.emplace_back("VK_LAYER_RENDERDOC_Capture");
 
   const vk::ApplicationInfo applicationInfo {
     .pApplicationName = "Hello World",
@@ -769,7 +746,175 @@ void Renderer::setup()
   _instance = vkr::Instance(_ctx, instanceCreateInfo);
 
   // Setup debugger
-  vkr::DebugUtilsMessengerEXT debugMessenger(
-    _instance, debugMessengerInfo);
+  /*vkr::DebugUtilsMessengerEXT debugMessenger(
+    _instance, debugMessengerInfo);*/
 }
+
+InFlightRendering::InFlightRendering(const Renderer& renderer)
+  : _renderer(renderer)
+{
+  const auto& device = _renderer._device;
+  // Image available semaphores
+  _imageAvailableSemaphores = {
+    vkr::Semaphore(device, vk::SemaphoreCreateInfo{}),
+    vkr::Semaphore(device, vk::SemaphoreCreateInfo{}),
+  };
+
+  // Image rendered semaphores
+  _imageRenderedSemaphores = {
+    vkr::Semaphore(device, vk::SemaphoreCreateInfo{}),
+    vkr::Semaphore(device, vk::SemaphoreCreateInfo{}),
+  };
+
+  // In flight fences
+  _inFlightFences = {
+    vkr::Fence(
+      device,
+      vk::FenceCreateInfo {
+        .flags = vk::FenceCreateFlagBits::eSignaled }),
+    vkr::Fence(
+      device,
+      vk::FenceCreateInfo {
+        .flags = vk::FenceCreateFlagBits::eSignaled }),
+  };
+
+  // Clear values.
+  _clearValues = {
+    vk::ClearValue {
+      .color = vk::ClearColorValue {
+        .float32 = {{ 0.2f, 0.2f, 0.2f, 0.2f}}
+      }
+    },
+    vk::ClearValue {
+      .depthStencil = vk::ClearDepthStencilValue {
+        .depth = 1.0f,
+        .stencil = 0,
+      }
+    }
+  };
+}
+
+void InFlightRendering::draw()
+{
+  render();
+  present();
+  _inFlightFrameIndex = (_inFlightFrameIndex + 1) % MaxFramesInFlight;
+}
+
+void InFlightRendering::render()
+{
+  const auto& device = _renderer._device;
+  const auto& frameFence
+    = *_inFlightFences[_inFlightFrameIndex];
+
+  const auto fenceWaitResult = device.waitForFences(
+    frameFence, true, UINT64_MAX);
+  assert(fenceWaitResult == vk::Result::eSuccess);
+  device.resetFences(frameFence);
+
+  const auto& imageAvailableSemaphore
+    = *_imageAvailableSemaphores[_inFlightFrameIndex];
+  const auto& imageRenderedSemaphore
+    = *_imageRenderedSemaphores[_inFlightFrameIndex];
+
+  const auto& swapchain = _renderer._swapChain;
+  auto [result, imageIndex] = swapchain.acquireNextImage(
+    UINT64_MAX, imageAvailableSemaphore);
+  _currentImageIndex = imageIndex;
+
+  assert(result == vk::Result::eSuccess);
+  assert(imageIndex < _renderer._swapChainImageViews.size());
+
+  const auto& commandBuffer = _renderer._commandBuffers[_inFlightFrameIndex];
+  commandBuffer.reset();
+  commandBuffer.begin(vk::CommandBufferBeginInfo{});
+
+  const vk::RenderPassBeginInfo renderPassBeginInfo {
+    .renderPass = *_renderer._renderPass,
+    .framebuffer = *_renderer._framebuffers[imageIndex],
+    .renderArea = vk::Rect2D {
+      .offset = {0, 0},
+      .extent = _renderer._surfaceCapabilities.currentExtent
+    },
+    .clearValueCount = static_cast<uint32_t>(_clearValues.size()),
+    .pClearValues = _clearValues.data()
+  };
+
+  commandBuffer.beginRenderPass(
+    renderPassBeginInfo, vk::SubpassContents::eInline);
+
+  commandBuffer.bindPipeline(
+    vk::PipelineBindPoint::eGraphics,
+    *_renderer._pipeline);
+
+  // Bind descriptor sets
+  const auto& pipelineLayout = *_renderer._pipelineLayout;
+  const auto& descriptorSet = *_renderer._uniformDescriptorSets.front();
+  commandBuffer.bindDescriptorSets(
+    vk::PipelineBindPoint::eGraphics,
+    pipelineLayout,
+    0,
+    descriptorSet,
+    nullptr);
+
+  // Bind VBOs
+  const auto& vertexBuffer = *_renderer._vertexBuffer;
+  commandBuffer.bindVertexBuffers(
+    0, {vertexBuffer}, {0});
+
+  // Scissor
+  commandBuffer.setScissor(
+    0, vk::Rect2D(vk::Offset2D( 0, 0 ), _renderer._surfaceCapabilities.currentExtent));
+
+  // Viewport
+  commandBuffer.setViewport(
+    0, vk::Viewport(
+      0.0f,
+      0.0f,
+      static_cast<float>(_renderer._surfaceCapabilities.currentExtent.width),
+      static_cast<float>(_renderer._surfaceCapabilities.currentExtent.height),
+      0.0f,
+      1.0f)
+  );
+
+  commandBuffer.draw(
+    24, 1, 0, 0);
+
+  commandBuffer.endRenderPass();
+  commandBuffer.end();
+
+  const vk::PipelineStageFlags waitDestinationStageMask(
+    vk::PipelineStageFlagBits::eColorAttachmentOutput);
+
+  const vk::SubmitInfo submitInfo {
+    .waitSemaphoreCount = 1,
+    .pWaitSemaphores = &imageAvailableSemaphore,
+    .pWaitDstStageMask = &waitDestinationStageMask,
+    .commandBufferCount = 1,
+    .pCommandBuffers = &(*commandBuffer),
+    .signalSemaphoreCount = 1,
+    .pSignalSemaphores = &imageRenderedSemaphore};
+
+  const auto& graphicsQueue
+    = _renderer._graphicsQueue;
+  graphicsQueue.submit(submitInfo, frameFence);
+}
+
+void InFlightRendering::present()
+{
+  const auto& swapchain = _renderer._swapChain;
+  const auto& frameRenderedSemaphore
+    = *_imageRenderedSemaphores[_inFlightFrameIndex];
+
+  vk::PresentInfoKHR presentInfoKHR {
+    .waitSemaphoreCount = 1,
+    .pWaitSemaphores = &frameRenderedSemaphore,
+    .swapchainCount = 1,
+    .pSwapchains = &(*swapchain),
+    .pImageIndices = &_currentImageIndex};
+
+  const auto& presentQueue = _renderer._presentQueue;
+  assert(presentQueue.presentKHR(presentInfoKHR) == vk::Result::eSuccess);
+}
+
 } // namespace vulkan

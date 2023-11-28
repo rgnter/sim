@@ -10,6 +10,7 @@ find_package(Vulkan REQUIRED)
 add_executable(sim
         src/main.cpp
         src/vulkan.cpp
+        include/sim/engine.hpp
         src/sim.cpp)
 target_include_directories(sim
         PUBLIC include/)
